@@ -41,20 +41,15 @@ def fetch_weather_data():
     return response.json()
 
 def calculate_risk(row):
-    """
-    【9月〜フェリー専用判定ロジック】
-    フェリー（おろろん2）の耐航性能に基づいた判定ルール
-    """
+    """【フェリー専用判定ロジック】"""
     wave = row["wave_height"]
     wind = row["wind_speed"]
     
     if pd.isna(wave) or pd.isna(wind):
         return "データなし", "gray", 0
 
-    # フェリー用スコア計算
     score = (wave * 25) + (wind * 3.5)
     
-    # フェリーの欠航基準（波高 2.5m 以上 または 風速 13m/s 以上）
     if wave >= 2.5 or wind >= 13 or score >= 65:
         return "欠航警戒（赤）", "red", min(100, int(score))
     elif wave >= 1.8 or wind >= 10 or score >= 45:
@@ -63,7 +58,7 @@ def calculate_risk(row):
         return "通常運航（緑）", "green", max(0, int(score))
 
 def process_forecast_data(data):
-    """取得したデータを実際のフェリー運行時間帯（8-12時 / 14-17時）に絞り込んで集計"""
+    """公式ダイヤ（第1便: 08:30-12:10 / 第2便: 14:00-17:35）に合わせた気象データ抽出"""
     df_hourly = pd.DataFrame({
         "datetime": pd.to_datetime(data["hourly"]["time"]),
         "wind_speed": data["hourly"]["wind_speed_10m"],
@@ -73,19 +68,18 @@ def process_forecast_data(data):
     df_hourly["date"] = df_hourly["datetime"].dt.strftime("%Y-%m-%d")
     df_hourly["hour"] = df_hourly["datetime"].dt.hour
     
-    # 【修正箇所】実際の運行時間帯（8〜12時、14〜17時）のみを抽出（12〜14時を除外）
+    # 【公式ダイヤ適用】
+    # 第1便 (8時〜12時) および 第2便 (14時〜18時) の航行時間帯のみを抽出
     df_operating = df_hourly[
         ((df_hourly["hour"] >= 8) & (df_hourly["hour"] <= 12)) |
-        ((df_hourly["hour"] >= 14) & (df_hourly["hour"] <= 17))
+        ((df_hourly["hour"] >= 14) & (df_hourly["hour"] <= 18))
     ]
     
-    # 日ごとに「運行時間帯の最大値」を計算
     daily_summary = df_operating.groupby("date").agg({
         "wind_speed": "max",
         "wave_height": "max"
     }).reset_index()
     
-    # フェリー専用判定の適用
     daily_summary[["status", "color", "probability"]] = daily_summary.apply(
         calculate_risk, axis=1, result_type="expand"
     )
@@ -160,7 +154,7 @@ def generate_html(daily_summary):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>羽幌沿海フェリー 欠航予測ダッシュボード（フェリー専用）</title>
+        <title>羽幌沿海フェリー 欠航予測ダッシュボード</title>
         <style>
             body {{ font-family: sans-serif; margin: 20px; line-height: 1.6; color: #333; }}
             h1, h2 {{ color: #2c3e50; }}
@@ -174,11 +168,11 @@ def generate_html(daily_summary):
     <body>
         <h1>羽幌沿海フェリー 欠航予測ダッシュボード</h1>
         <div class="notice">
-            <strong>【秋季ダイヤ対応】</strong> 9月以降の高速船運休に伴い、本予測システムは<strong>「フェリー（おろろん2）」専用の運航判定・学習モード</strong>で稼働しています。（対象時間帯: 08:00〜12:00 / 14:00〜17:00）
+            <strong>【9月ダイヤ対応】</strong> フェリー（おろろん2）運航ダイヤ（第1便: 08:30〜12:10 / 第2便: 14:00〜17:35）に基づき航行時間帯限定で気象判定を行っています。
         </div>
         <p>最終更新: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (JST)</p>
         
-        <h2>フェリー週間欠航予測 (実運行時間帯の最大値基準)</h2>
+        <h2>フェリー週間欠航予測 (公式ダイヤ航行時間帯基準)</h2>
         <table>
             <tr>
                 <th>日付</th>
@@ -206,7 +200,7 @@ def main():
     print("気象データ取得中 (Open-Meteo)...")
     weather_data = fetch_weather_data()
     
-    print("データ処理・フェリー運行時間帯限定予測中...")
+    print("公式ダイヤに合わせた精度計算中...")
     daily_summary = process_forecast_data(weather_data)
     
     print("本日の実績データをDBへ保存中...")
