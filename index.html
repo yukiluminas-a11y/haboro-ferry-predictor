@@ -8,19 +8,20 @@
         <style>
             body { font-family: sans-serif; margin: 20px; line-height: 1.6; color: #333; }
             h1, h2 { color: #2c3e50; }
-            .notice { background-color: #eef6ff; padding: 10px 15px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
-            table { border-collapse: collapse; width: 100%; max-width: 900px; margin-bottom: 30px; }
+            .notice { background-color: #eef6ff; padding: 12px 15px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
+            table { border-collapse: collapse; width: 100%; max-width: 950px; margin-bottom: 30px; }
             th, td { border: 1px solid #ccc; padding: 10px; text-align: center; }
             th { background-color: #f4f4f4; }
-            .past-records { width: 100%; max-width: 900px; }
+            .past-records { width: 100%; max-width: 950px; }
         </style>
     </head>
     <body>
         <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
         <div class="notice">
-            <strong>【9月ダイヤ対応】</strong> 第1便（羽幌発 08:30 / 返り 12:10着）と 第2便（羽幌発 14:00 / 返り 17:35着）の時間帯別気象データに基づき、便ごとに独立して運航予測を行っています。
+            <strong>【運航管理規約 準拠判定】</strong><br>
+            規約（regulations02.pdf）に定められた限界値（フェリーおろろん2: 風速15m/s、波高2.5m、視界500m）に基づき自動判定を行っています。
         </div>
-        <p>最終更新: 2026-08-30 15:51:11 (JST)</p>
+        <p>最終更新: 2026-08-30 16:01:01 (JST)</p>
         
         <h2>フェリー週間欠航予測（便別）</h2>
         <table>
@@ -30,66 +31,66 @@
                 <th colspan="2">第2便（午後便）</th>
             </tr>
             <tr>
-                <th>気象（波高 / 風速）</th>
+                <th>気象（波高 / 風速 / 視界）</th>
                 <th>予測判定</th>
-                <th>気象（波高 / 風速）</th>
+                <th>気象（波高 / 風速 / 視界）</th>
                 <th>予測判定</th>
             </tr>
             
         <tr>
             <td>2026-08-31</td>
-            <td>nanm / 13.3m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
-            <td>nanm / 13.9m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>データなし / 13.3m/s (視界:39.1km)</td>
+            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
+            <td>データなし / 13.9m/s (視界:32.8km)</td>
+            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
         </tr>
         
         <tr>
             <td>2026-09-01</td>
-            <td>nanm / 9.7m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
-            <td>nanm / 11.9m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>データなし / 9.7m/s (視界:42.7km)</td>
+            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
+            <td>データなし / 11.9m/s (視界:42.8km)</td>
+            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
         </tr>
         
         <tr>
             <td>2026-09-02</td>
-            <td>nanm / 13.9m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
-            <td>nanm / 17.5m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>データなし / 13.9m/s (視界:5.0km)</td>
+            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
+            <td>データなし / 17.5m/s (視界:20.9km)</td>
+            <td><span style="color:red; font-weight:bold;">欠航警戒（基準超過）</span></td>
         </tr>
         
         <tr>
             <td>2026-09-03</td>
-            <td>nanm / 20.8m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
-            <td>nanm / 16.5m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>データなし / 20.8m/s (視界:14.5km)</td>
+            <td><span style="color:red; font-weight:bold;">欠航警戒（基準超過）</span></td>
+            <td>データなし / 16.5m/s (視界:17.0km)</td>
+            <td><span style="color:red; font-weight:bold;">欠航警戒（基準超過）</span></td>
         </tr>
         
         <tr>
             <td>2026-09-04</td>
-            <td>nanm / 14.3m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
-            <td>nanm / 14.0m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>データなし / 14.3m/s (視界:41.8km)</td>
+            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
+            <td>データなし / 14.0m/s (視界:43.1km)</td>
+            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
         </tr>
         
         <tr>
             <td>2026-09-05</td>
-            <td>nanm / 7.0m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
-            <td>nanm / 14.5m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>データなし / 7.0m/s (視界:41.5km)</td>
+            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
+            <td>データなし / 14.5m/s (視界:10.2km)</td>
+            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
         </tr>
         
         <tr>
             <td>2026-09-06</td>
-            <td>nanm / 6.8m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
-            <td>nanm / 7.9m/s</td>
-            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>データなし / 6.8m/s (視界:46.8km)</td>
+            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
+            <td>データなし / 7.9m/s (視界:30.3km)</td>
+            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
         </tr>
         
         </table>
