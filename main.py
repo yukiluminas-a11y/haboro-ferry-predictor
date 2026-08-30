@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- 設定 ---
 DB_PATH = "ferry_data.sqlite"
-LATITUDE = 44.38   # 羽幌〜焼尻・天売エリアの緯度
+LATITUDE = 44.38   # 羽幌〜焼尻・天売エリア（緯度）
 LONGITUDE = 141.70 # 経度
 
 def setup_database():
@@ -20,48 +20,88 @@ def setup_database():
             status TEXT,
             wind_speed REAL,
             wave_height REAL,
-            weathercode INTEGER,
+            visibility REAL,
             created_at TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
-def fetch_weather_data():
-    """Open-Meteoから気象データを取得（日本時間指定）"""
-    url = "https://api.open-meteo.com/v1/forecast"
-    params = {
+def fetch_combined_weather_data():
+    """
+    Open-Meteo から気象（風速・視程）と海洋（波高）データを取得して結合
+    """
+    # 1. 陸上気象 API（風速・視程）
+    forecast_url = "https://api.open-meteo.com/v1/forecast"
+    forecast_params = {
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
-        "hourly": ["wind_speed_10m", "wave_height"],
+        "hourly": ["wind_speed_10m", "visibility"],
         "timezone": "Asia/Tokyo"
     }
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-    return response.json()
+    res_forecast = requests.get(forecast_url, params=forecast_params)
+    res_forecast.raise_for_status()
+    data_forecast = res_forecast.json()
 
-def calculate_flight_risk(wave, wind):
-    """便ごとの波高・風速から欠航リスクを判定"""
+    # 2. 海洋 API（波高）
+    marine_url = "https://api.open-meteo.com/v1/marine"
+    marine_params = {
+        "latitude": LATITUDE,
+        "longitude": LONGITUDE,
+        "hourly": ["wave_height"],
+        "timezone": "Asia/Tokyo"
+    }
+    res_marine = requests.get(marine_url, params=marine_params)
+    res_marine.raise_for_status()
+    data_marine = res_marine.json()
+
+    # DataFrame 化
+    df_forecast = pd.DataFrame({
+        "datetime": pd.to_datetime(data_forecast["hourly"]["time"]),
+        "wind_speed": data_forecast["hourly"]["wind_speed_10m"],
+        "visibility": data_forecast["hourly"]["visibility"] # メートル単位 (例: 10000m)
+    })
+    
+    df_marine = pd.DataFrame({
+        "datetime": pd.to_datetime(data_marine["hourly"]["time"]),
+        "wave_height": data_marine["hourly"]["wave_height"]
+    })
+
+    # 時間軸でマージ
+    return pd.merge(df_forecast, df_marine, on="datetime", how="outer")
+
+def calculate_flight_risk(wave, wind, visibility, vessel_type="ferry"):
+    """
+    羽幌沿海フェリー安全運航基準（regulations02.pdf）に基づく運航判定
+    - フェリーおろろん2: 風速 15m/s, 波高 2.5m, 視界 500m
+    - 高速船さんらいなぁ2: 風速 12m/s, 波高 1.5m, 視界 500m
+    """
     if pd.isna(wave) or pd.isna(wind):
         return "データなし", "gray", 0
 
-    score = (wave * 25) + (wind * 3.5)
-    
-    if wave >= 2.5 or wind >= 13 or score >= 65:
-        return "欠航警戒（赤）", "red", min(100, int(score))
-    elif wave >= 1.8 or wind >= 10 or score >= 45:
-        return "運航注意（黄）", "yellow", int(score)
+    if vessel_type == "high_speed":
+        limit_wind, limit_wave = 12.0, 1.5
+        warn_wind, warn_wave = 9.0, 1.0
     else:
-        return "通常運航（緑）", "green", max(0, int(score))
+        limit_wind, limit_wave = 15.0, 2.5
+        warn_wind, warn_wave = 11.0, 1.8
 
-def process_forecast_data(data):
-    """1便（8-12時）と2便（14-18時）を分離して個別に計算"""
-    df_hourly = pd.DataFrame({
-        "datetime": pd.to_datetime(data["hourly"]["time"]),
-        "wind_speed": data["hourly"]["wind_speed_10m"],
-        "wave_height": data["hourly"]["wave_height"]
-    })
-    
+    limit_vis = 500.0   # 限界視界 (m)
+    warn_vis = 1000.0   # 注意視界 (m)
+    vis_meters = visibility if not pd.isna(visibility) else 10000.0
+
+    # 運航中止限界条件（規約基準超過）
+    if wind >= limit_wind or wave >= limit_wave or vis_meters <= limit_vis:
+        return "欠航警戒（基準超過）", "red", 95
+    # 運航注意条件
+    elif wind >= warn_wind or wave >= warn_wave or vis_meters <= warn_vis:
+        return "運航注意（出港慎重）", "yellow", 60
+    # 通常運航
+    else:
+        return "通常運航", "green", 10
+
+def process_forecast_data(df_hourly):
+    """第1便（08-12時）と第2便（14-18時）それぞれでピーク気象値を判定"""
     df_hourly["date"] = df_hourly["datetime"].dt.strftime("%Y-%m-%d")
     df_hourly["hour"] = df_hourly["datetime"].dt.hour
     
@@ -72,37 +112,39 @@ def process_forecast_data(data):
         df_day = df_hourly[df_hourly["date"] == d]
         
         # 第1便 (08:00 〜 12:00)
-        df_flight1 = df_day[(df_day["hour"] >= 8) & (df_day["hour"] <= 12)]
-        if not df_flight1.empty:
-            wave1 = df_flight1["wave_height"].max()
-            wind1 = df_flight1["wind_speed_10m"].max() if "wind_speed_10m" in df_flight1 else df_flight1["wind_speed"].max()
-            status1, color1, prob1 = calculate_flight_risk(wave1, wind1)
+        df_f1 = df_day[(df_day["hour"] >= 8) & (df_day["hour"] <= 12)]
+        if not df_f1.empty and df_f1["wave_height"].notna().any():
+            wave1 = df_f1["wave_height"].max()
+            wind1 = df_f1["wind_speed"].max()
+            vis1 = df_f1["visibility"].min()
+            status1, color1, prob1 = calculate_flight_risk(wave1, wind1, vis1)
         else:
-            wave1, wind1, status1, color1, prob1 = None, None, "データなし", "gray", 0
+            wave1, wind1, vis1, status1, color1, prob1 = None, None, None, "データなし", "gray", 0
 
         # 第2便 (14:00 〜 18:00)
-        df_flight2 = df_day[(df_day["hour"] >= 14) & (df_day["hour"] <= 18)]
-        if not df_flight2.empty:
-            wave2 = df_flight2["wave_height"].max()
-            wind2 = df_flight2["wind_speed_10m"].max() if "wind_speed_10m" in df_flight2 else df_flight2["wind_speed"].max()
-            status2, color2, prob2 = calculate_flight_risk(wave2, wind2)
+        df_f2 = df_day[(df_day["hour"] >= 14) & (df_day["hour"] <= 18)]
+        if not df_f2.empty and df_f2["wave_height"].notna().any():
+            wave2 = df_f2["wave_height"].max()
+            wind2 = df_f2["wind_speed"].max()
+            vis2 = df_f2["visibility"].min()
+            status2, color2, prob2 = calculate_flight_risk(wave2, wind2, vis2)
         else:
-            wave2, wind2, status2, color2, prob2 = None, None, "データなし", "gray", 0
+            wave2, wind2, vis2, status2, color2, prob2 = None, None, None, "データなし", "gray", 0
             
         results.append({
             "date": d,
-            "wave1": wave1, "wind1": wind1, "status1": status1, "color1": color1, "prob1": prob1,
-            "wave2": wave2, "wind2": wind2, "status2": status2, "color2": color2, "prob2": prob2
+            "wave1": wave1, "wind1": wind1, "vis1": vis1, "status1": status1, "color1": color1, "prob1": prob1,
+            "wave2": wave2, "wind2": wind2, "vis2": vis2, "status2": status2, "color2": color2, "prob2": prob2
         })
         
     return pd.DataFrame(results)
 
 def get_past_records_html():
-    """データベースから直近の実績を取得してHTML化"""
+    """DBから過去実績（直近10件）を取得"""
     conn = sqlite3.connect(DB_PATH)
     query = """
         SELECT date AS 日付, status AS 運航状況, 
-               wind_speed AS '風速(m/s)', wave_height AS '波高(m)'
+               wind_speed AS '最大風速(m/s)', wave_height AS '最大波高(m)'
         FROM ferry_records 
         ORDER BY date DESC LIMIT 10
     """
@@ -118,39 +160,39 @@ def get_past_records_html():
     return html
 
 def save_today_record(df_summary):
-    """今日のデータをデータベースに記録"""
+    """本日の最大値を DB に永続化"""
     today_str = datetime.now().strftime("%Y-%m-%d")
     today_data = df_summary[df_summary["date"] == today_str]
     
     if not today_data.empty:
         row = today_data.iloc[0]
-        # 日全体の代表値（最大波高・最大風速・厳しい方の判定）
         max_wave = max(filter(None, [row["wave1"], row["wave2"]]), default=0)
         max_wind = max(filter(None, [row["wind1"], row["wind2"]]), default=0)
+        min_vis = min(filter(None, [row["vis1"], row["vis2"]]), default=10000)
         status_text = f"1便:{row['status1']} / 2便:{row['status2']}"
         
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT OR REPLACE INTO ferry_records (date, status, wind_speed, wave_height, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (today_str, status_text, max_wind, max_wave, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            INSERT OR REPLACE INTO ferry_records (date, status, wind_speed, wave_height, visibility, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (today_str, status_text, max_wind, max_wave, min_vis, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
         conn.close()
 
 def generate_html(df_summary):
-    """1便・2便を併記したWebダッシュボード（index.html）を出力"""
+    """ダッシュボード (index.html) の出力"""
     forecast_rows = ""
     for _, row in df_summary.iterrows():
         date = row["date"]
         
-        # 1便データ整形
-        w1 = f'{row["wave1"]:.1f}m / {row["wind1"]:.1f}m/s' if row["wave1"] is not None else "-"
-        s1 = f'<span style="color:{row["color1"]}; font-weight:bold;">{row["status1"]} ({row["prob1"]}%)</span>'
+        vis1_km = f"{row['vis1']/1000:.1f}km" if row["vis1"] is not None else "-"
+        w1 = f'{row["wave1"]:.1f}m / {row["wind1"]:.1f}m/s (視界:{vis1_km})' if row["wave1"] is not None else "-"
+        s1 = f'<span style="color:{row["color1"]}; font-weight:bold;">{row["status1"]}</span>'
         
-        # 2便データ整形
-        w2 = f'{row["wave2"]:.1f}m / {row["wind2"]:.1f}m/s' if row["wave2"] is not None else "-"
-        s2 = f'<span style="color:{row["color2"]}; font-weight:bold;">{row["status2"]} ({row["prob2"]}%)</span>'
+        vis2_km = f"{row['vis2']/1000:.1f}km" if row["vis2"] is not None else "-"
+        w2 = f'{row["wave2"]:.1f}m / {row["wind2"]:.1f}m/s (視界:{vis2_km})' if row["wave2"] is not None else "-"
+        s2 = f'<span style="color:{row["color2"]}; font-weight:bold;">{row["status2"]}</span>'
         
         forecast_rows += f"""
         <tr>
@@ -174,17 +216,18 @@ def generate_html(df_summary):
         <style>
             body {{ font-family: sans-serif; margin: 20px; line-height: 1.6; color: #333; }}
             h1, h2 {{ color: #2c3e50; }}
-            .notice {{ background-color: #eef6ff; padding: 10px 15px; border-left: 5px solid #0066cc; margin-bottom: 20px; }}
-            table {{ border-collapse: collapse; width: 100%; max-width: 900px; margin-bottom: 30px; }}
+            .notice {{ background-color: #eef6ff; padding: 12px 15px; border-left: 5px solid #0066cc; margin-bottom: 20px; }}
+            table {{ border-collapse: collapse; width: 100%; max-width: 950px; margin-bottom: 30px; }}
             th, td {{ border: 1px solid #ccc; padding: 10px; text-align: center; }}
             th {{ background-color: #f4f4f4; }}
-            .past-records {{ width: 100%; max-width: 900px; }}
+            .past-records {{ width: 100%; max-width: 950px; }}
         </style>
     </head>
     <body>
         <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
         <div class="notice">
-            <strong>【9月ダイヤ対応】</strong> 第1便（羽幌発 08:30 / 返り 12:10着）と 第2便（羽幌発 14:00 / 返り 17:35着）の時間帯別気象データに基づき、便ごとに独立して運航予測を行っています。
+            <strong>【運航管理規約 準拠判定】</strong><br>
+            規約（regulations02.pdf）に定められた限界値（フェリーおろろん2: 風速15m/s、波高2.5m、視界500m）に基づき自動判定を行っています。
         </div>
         <p>最終更新: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (JST)</p>
         
@@ -196,9 +239,9 @@ def generate_html(df_summary):
                 <th colspan="2">第2便（午後便）</th>
             </tr>
             <tr>
-                <th>気象（波高 / 風速）</th>
+                <th>気象（波高 / 風速 / 視界）</th>
                 <th>予測判定</th>
-                <th>気象（波高 / 風速）</th>
+                <th>気象（波高 / 風速 / 視界）</th>
                 <th>予測判定</th>
             </tr>
             {forecast_rows}
@@ -217,11 +260,11 @@ def main():
     print("データベース初期化中...")
     setup_database()
     
-    print("気象データ取得中 (Open-Meteo)...")
-    weather_data = fetch_weather_data()
+    print("気象・海洋データ取得中 (Forecast & Marine API)...")
+    df_hourly = fetch_combined_weather_data()
     
-    print("便別（1便・2便）の予測計算中...")
-    df_summary = process_forecast_data(weather_data)
+    print("安全運航基準に照らし合わせて便別予測計算中...")
+    df_summary = process_forecast_data(df_hourly)
     
     print("本日の実績データをDBへ保存中...")
     save_today_record(df_summary)
