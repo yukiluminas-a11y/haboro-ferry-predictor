@@ -6,97 +6,106 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>羽幌沿海フェリー 便別欠航予測ダッシュボード</title>
         <style>
-            body { font-family: sans-serif; margin: 20px; line-height: 1.6; color: #333; }
-            h1, h2 { color: #2c3e50; }
-            .notice { background-color: #eef6ff; padding: 12px 15px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
-            table { border-collapse: collapse; width: 100%; max-width: 950px; margin-bottom: 30px; }
-            th, td { border: 1px solid #ccc; padding: 10px; text-align: center; }
-            th { background-color: #f4f4f4; }
-            .past-records { width: 100%; max-width: 950px; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 20px; line-height: 1.6; color: #212529; background-color: #f8f9fa; }
+            .container { max-width: 1000px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            h1, h2 { color: #1a252f; border-bottom: 2px solid #e9ecef; padding-bottom: 8px; }
+            .notice { background-color: #e7f5ff; padding: 12px 15px; border-left: 5px solid #1c7ed6; margin-bottom: 20px; border-radius: 4px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 30px; background-color: #fff; }
+            th, td { border: 1px solid #dee2e6; padding: 12px; text-align: center; vertical-align: middle; }
+            th { background-color: #f1f3f5; color: #495057; font-weight: 600; }
+            .past-records table { width: 100%; }
         </style>
     </head>
     <body>
-        <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
-        <div class="notice">
-            <strong>【運航管理規約 準拠判定】</strong><br>
-            規約（regulations02.pdf）に定められた限界値（フェリーおろろん2: 風速15m/s、波高2.5m、視界500m）に基づき自動判定を行っています。
-        </div>
-        <p>最終更新: 2026-08-30 16:01:01 (JST)</p>
-        
-        <h2>フェリー週間欠航予測（便別）</h2>
-        <table>
-            <tr>
-                <th rowspan="2">日付</th>
-                <th colspan="2">第1便（午前便）</th>
-                <th colspan="2">第2便（午後便）</th>
-            </tr>
-            <tr>
-                <th>気象（波高 / 風速 / 視界）</th>
-                <th>予測判定</th>
-                <th>気象（波高 / 風速 / 視界）</th>
-                <th>予測判定</th>
-            </tr>
+        <div class="container">
+            <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
+            <div class="notice">
+                <strong>【運航管理規約 準拠判定】</strong><br>
+                規約（regulations02.pdf）に定められた限界値（フェリーおろろん2: 風速15m/s、波高2.5m、視界500m）に基づき自動判定を行っています。
+            </div>
+            <p style="color:#6c757d; font-size:0.9em;">最終更新: 2026-08-30 16:06:01 (JST)</p>
             
+            <h2>フェリー週間欠航予測（便別）</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2" style="width: 15%;">日付</th>
+                        <th colspan="2" style="width: 42.5%;">第1便（午前便）</th>
+                        <th colspan="2" style="width: 42.5%;">第2便（午後便）</th>
+                    </tr>
+                    <tr>
+                        <th>気象データ</th>
+                        <th>予測判定</th>
+                        <th>気象データ</th>
+                        <th>予測判定</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
         <tr>
-            <td>2026-08-31</td>
-            <td>データなし / 13.3m/s (視界:39.1km)</td>
-            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
-            <td>データなし / 13.9m/s (視界:32.8km)</td>
-            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
+            <td><strong>2026-08-31</strong></td>
+            <td>波高: 取得不可 / 風速: 14.7m/s <br><small style="color:#666;">視界: 36.7km</small></td>
+            <td><span style="color:#856404; background-color:#fff3cd; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">運航注意（風速注意）</span></td>
+            <td>波高: 取得不可 / 風速: 22.3m/s <br><small style="color:#666;">視界: 38.8km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
         </tr>
         
         <tr>
-            <td>2026-09-01</td>
-            <td>データなし / 9.7m/s (視界:42.7km)</td>
-            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
-            <td>データなし / 11.9m/s (視界:42.8km)</td>
-            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
+            <td><strong>2026-09-01</strong></td>
+            <td>波高: 取得不可 / 風速: 20.6m/s <br><small style="color:#666;">視界: 38.9km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
+            <td>波高: 取得不可 / 風速: 23.8m/s <br><small style="color:#666;">視界: 42.8km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
         </tr>
         
         <tr>
-            <td>2026-09-02</td>
-            <td>データなし / 13.9m/s (視界:5.0km)</td>
-            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
-            <td>データなし / 17.5m/s (視界:20.9km)</td>
-            <td><span style="color:red; font-weight:bold;">欠航警戒（基準超過）</span></td>
+            <td><strong>2026-09-02</strong></td>
+            <td>波高: 取得不可 / 風速: 29.5m/s <br><small style="color:#666;">視界: 6.3km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
+            <td>波高: 取得不可 / 風速: 31.9m/s <br><small style="color:#666;">視界: 11.9km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
         </tr>
         
         <tr>
-            <td>2026-09-03</td>
-            <td>データなし / 20.8m/s (視界:14.5km)</td>
-            <td><span style="color:red; font-weight:bold;">欠航警戒（基準超過）</span></td>
-            <td>データなし / 16.5m/s (視界:17.0km)</td>
-            <td><span style="color:red; font-weight:bold;">欠航警戒（基準超過）</span></td>
+            <td><strong>2026-09-03</strong></td>
+            <td>波高: 取得不可 / 風速: 35.1m/s <br><small style="color:#666;">視界: 27.3km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
+            <td>波高: 取得不可 / 風速: 30.2m/s <br><small style="color:#666;">視界: 11.1km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
         </tr>
         
         <tr>
-            <td>2026-09-04</td>
-            <td>データなし / 14.3m/s (視界:41.8km)</td>
-            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
-            <td>データなし / 14.0m/s (視界:43.1km)</td>
-            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
+            <td><strong>2026-09-04</strong></td>
+            <td>波高: 取得不可 / 風速: 26.0m/s <br><small style="color:#666;">視界: 33.8km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
+            <td>波高: 取得不可 / 風速: 28.6m/s <br><small style="color:#666;">視界: 43.2km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
         </tr>
         
         <tr>
-            <td>2026-09-05</td>
-            <td>データなし / 7.0m/s (視界:41.5km)</td>
-            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
-            <td>データなし / 14.5m/s (視界:10.2km)</td>
-            <td><span style="color:yellow; font-weight:bold;">運航注意（出港慎重）</span></td>
+            <td><strong>2026-09-05</strong></td>
+            <td>波高: 取得不可 / 風速: 21.4m/s <br><small style="color:#666;">視界: 11.3km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
+            <td>波高: 取得不可 / 風速: 27.6m/s <br><small style="color:#666;">視界: 7.3km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
         </tr>
         
         <tr>
-            <td>2026-09-06</td>
-            <td>データなし / 6.8m/s (視界:46.8km)</td>
-            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
-            <td>データなし / 7.9m/s (視界:30.3km)</td>
-            <td><span style="color:green; font-weight:bold;">通常運航</span></td>
+            <td><strong>2026-09-06</strong></td>
+            <td>波高: 取得不可 / 風速: 31.6m/s <br><small style="color:#666;">視界: 39.1km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
+            <td>波高: 取得不可 / 風速: 28.4m/s <br><small style="color:#666;">視界: 32.1km</small></td>
+            <td><span style="color:#721c24; background-color:#f8d7da; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">欠航警戒（風速超過）</span></td>
         </tr>
         
-        </table>
-        
-        <h2>過去の運航・欠航実績 (直近10件)</h2>
-        <p>過去の実績データはまだ蓄積されていません。</p>
+                </tbody>
+            </table>
+            
+            <h2>過去の運航・欠航実績 (直近10件)</h2>
+            <div class="past-records">
+                <p>過去の実績データはまだ蓄積されていません。</p>
+            </div>
+        </div>
     </body>
     </html>
     
