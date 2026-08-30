@@ -4,88 +4,92 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>羽幌沿海フェリー 欠航予測ダッシュボード</title>
+        <title>羽幌沿海フェリー 便別欠航予測ダッシュボード</title>
         <style>
             body { font-family: sans-serif; margin: 20px; line-height: 1.6; color: #333; }
             h1, h2 { color: #2c3e50; }
             .notice { background-color: #eef6ff; padding: 10px 15px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
-            table { border-collapse: collapse; width: 100%; max-width: 800px; margin-bottom: 30px; }
+            table { border-collapse: collapse; width: 100%; max-width: 900px; margin-bottom: 30px; }
             th, td { border: 1px solid #ccc; padding: 10px; text-align: center; }
             th { background-color: #f4f4f4; }
-            .past-records { width: 100%; max-width: 800px; }
+            .past-records { width: 100%; max-width: 900px; }
         </style>
     </head>
     <body>
-        <h1>羽幌沿海フェリー 欠航予測ダッシュボード</h1>
+        <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
         <div class="notice">
-            <strong>【9月ダイヤ対応】</strong> フェリー（おろろん2）運航ダイヤ（第1便: 08:30〜12:10 / 第2便: 14:00〜17:35）に基づき航行時間帯限定で気象判定を行っています。
+            <strong>【9月ダイヤ対応】</strong> 第1便（羽幌発 08:30 / 返り 12:10着）と 第2便（羽幌発 14:00 / 返り 17:35着）の時間帯別気象データに基づき、便ごとに独立して運航予測を行っています。
         </div>
-        <p>最終更新: 2026-08-30 15:48:18 (JST)</p>
+        <p>最終更新: 2026-08-30 15:51:11 (JST)</p>
         
-        <h2>フェリー週間欠航予測 (公式ダイヤ航行時間帯基準)</h2>
+        <h2>フェリー週間欠航予測（便別）</h2>
         <table>
             <tr>
-                <th>日付</th>
-                <th>予測波高 (m)</th>
-                <th>予測風速 (m/s)</th>
-                <th>欠航確率</th>
-                <th>判定</th>
+                <th rowspan="2">日付</th>
+                <th colspan="2">第1便（午前便）</th>
+                <th colspan="2">第2便（午後便）</th>
+            </tr>
+            <tr>
+                <th>気象（波高 / 風速）</th>
+                <th>予測判定</th>
+                <th>気象（波高 / 風速）</th>
+                <th>予測判定</th>
             </tr>
             
-        <tr style="background-color: #f0f0f0;">
+        <tr>
             <td>2026-08-31</td>
-            <td>-</td>
-            <td>13.9</td>
-            <td>0%</td>
-            <td style="color: gray; font-weight: bold;">データなし</td>
+            <td>nanm / 13.3m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>nanm / 13.9m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
         </tr>
         
-        <tr style="background-color: #f0f0f0;">
+        <tr>
             <td>2026-09-01</td>
-            <td>-</td>
-            <td>11.9</td>
-            <td>0%</td>
-            <td style="color: gray; font-weight: bold;">データなし</td>
+            <td>nanm / 9.7m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>nanm / 11.9m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
         </tr>
         
-        <tr style="background-color: #f0f0f0;">
+        <tr>
             <td>2026-09-02</td>
-            <td>-</td>
-            <td>17.5</td>
-            <td>0%</td>
-            <td style="color: gray; font-weight: bold;">データなし</td>
+            <td>nanm / 13.9m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>nanm / 17.5m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
         </tr>
         
-        <tr style="background-color: #f0f0f0;">
+        <tr>
             <td>2026-09-03</td>
-            <td>-</td>
-            <td>20.8</td>
-            <td>0%</td>
-            <td style="color: gray; font-weight: bold;">データなし</td>
+            <td>nanm / 20.8m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>nanm / 16.5m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
         </tr>
         
-        <tr style="background-color: #f0f0f0;">
+        <tr>
             <td>2026-09-04</td>
-            <td>-</td>
-            <td>14.3</td>
-            <td>0%</td>
-            <td style="color: gray; font-weight: bold;">データなし</td>
+            <td>nanm / 14.3m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>nanm / 14.0m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
         </tr>
         
-        <tr style="background-color: #f0f0f0;">
+        <tr>
             <td>2026-09-05</td>
-            <td>-</td>
-            <td>14.5</td>
-            <td>0%</td>
-            <td style="color: gray; font-weight: bold;">データなし</td>
+            <td>nanm / 7.0m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>nanm / 14.5m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
         </tr>
         
-        <tr style="background-color: #f0f0f0;">
+        <tr>
             <td>2026-09-06</td>
-            <td>-</td>
-            <td>7.9</td>
-            <td>0%</td>
-            <td style="color: gray; font-weight: bold;">データなし</td>
+            <td>nanm / 6.8m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
+            <td>nanm / 7.9m/s</td>
+            <td><span style="color:gray; font-weight:bold;">データなし (0%)</span></td>
         </tr>
         
         </table>
