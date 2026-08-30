@@ -1,3 +1,4 @@
+
 name: Daily Ferry Forecast Auto-Learner
 
 on:
@@ -54,10 +55,6 @@ jobs:
     permissions:
       pages: write
       id-token: write
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: GitHub Pages へデプロイ
