@@ -6,9 +6,13 @@ from datetime import datetime
 
 # --- 設定 ---
 DB_PATH = "ferry_data.sqlite"
-# 港（陸上）ではなく少し沖合の座標を指定（海洋データの取得漏れを防ぐため）
-LATITUDE = 44.38   # 羽幌〜焼尻・天売エリア（緯度）
-LONGITUDE = 141.60 # 経度（やや沖合）
+
+# 取得を試みる座標リスト (1番目が取得不可なら2番目・3番目の沖合座標を使用)
+LOCATION_CANDIDATES = [
+    {"lat": 44.38, "lon": 141.30, "name": "日本海沖合1（沿岸寄り）"},
+    {"lat": 44.38, "lon": 141.10, "name": "日本海沖合2（中央部）"},
+    {"lat": 44.40, "lon": 140.80, "name": "日本海沖合3（広域）"}
+]
 
 def setup_database():
     """データベースとテーブルの初期化"""
@@ -33,28 +37,19 @@ def setup_database():
 
 def fetch_combined_weather_data():
     """
-    Open-Meteo から気象（風速・視程）と海洋（波高）データを安全に取得して結合
+    Open-Meteo から気象（風速・視程）と海洋（波高）データを複数バックアップ地点から確実に取得
     """
     headers = {'User-Agent': 'FerryForecastApp/1.0'}
     
-    # 1. 陸上気象 API（風速・視程）
+    # 1. 陸上気象 API（風速・視程）の取得
     forecast_url = "https://api.open-meteo.com/v1/forecast"
     forecast_params = {
-        "latitude": LATITUDE,
-        "longitude": LONGITUDE,
+        "latitude": LOCATION_CANDIDATES[0]["lat"],
+        "longitude": LOCATION_CANDIDATES[0]["lon"],
         "hourly": ["wind_speed_10m", "visibility"],
         "timezone": "Asia/Tokyo"
     }
     
-    # 2. 海洋 API（波高）
-    marine_url = "https://api.open-meteo.com/v1/marine"
-    marine_params = {
-        "latitude": LATITUDE,
-        "longitude": LONGITUDE,
-        "hourly": ["wave_height"],
-        "timezone": "Asia/Tokyo"
-    }
-
     try:
         res_forecast = requests.get(forecast_url, params=forecast_params, headers=headers, timeout=10)
         res_forecast.raise_for_status()
@@ -63,15 +58,6 @@ def fetch_combined_weather_data():
         print(f"気象APIの取得に失敗しました: {e}")
         return pd.DataFrame()
 
-    try:
-        res_marine = requests.get(marine_url, params=marine_params, headers=headers, timeout=10)
-        res_marine.raise_for_status()
-        data_marine = res_marine.json()
-    except Exception as e:
-        print(f"海洋APIの取得に失敗しました（波高データなしで継続します）: {e}")
-        data_marine = {}
-
-    # 風速・視界データの抽出
     times = data_forecast.get("hourly", {}).get("time", [])
     winds = data_forecast.get("hourly", {}).get("wind_speed_10m", [])
     visibilities = data_forecast.get("hourly", {}).get("visibility", [10000] * len(times))
@@ -82,29 +68,66 @@ def fetch_combined_weather_data():
         "visibility": visibilities
     })
 
-    # 波高データの抽出（安全にキーチェック）
-    marine_hourly = data_marine.get("hourly", {})
-    m_times = marine_hourly.get("time", [])
-    m_waves = marine_hourly.get("wave_height", [])
+    # 2. 海洋 API（波高）の多重バックアップ取得
+    marine_url = "https://api.open-meteo.com/v1/marine"
+    df_marine = None
 
-    if m_times and m_waves:
-        df_marine = pd.DataFrame({
-            "datetime": pd.to_datetime(m_times),
-            "wave_height": m_waves
-        })
+    for loc in LOCATION_CANDIDATES:
+        marine_params = {
+            "latitude": loc["lat"],
+            "longitude": loc["lon"],
+            "hourly": ["wave_height", "wind_wave_height", "swell_wave_height"],
+            "timezone": "Asia/Tokyo"
+        }
+        try:
+            res_marine = requests.get(marine_url, params=marine_params, headers=headers, timeout=10)
+            res_marine.raise_for_status()
+            data_marine = res_marine.json()
+            
+            m_hourly = data_marine.get("hourly", {})
+            m_times = m_hourly.get("time", [])
+            m_waves = m_hourly.get("wave_height", [])
+            m_wind_waves = m_hourly.get("wind_wave_height", [])
+
+            # 波高データが存在するかチェック
+            valid_waves = [w for w in m_waves if w is not None]
+            if m_times and len(valid_waves) > 0:
+                print(f"波高データを正常取得しました (使用座標: {loc['name']})")
+                
+                # バックアップ処理: wave_height が None の場合は wind_wave_height で補完
+                final_waves = []
+                for idx, w in enumerate(m_waves):
+                    if w is not None:
+                        final_waves.append(w)
+                    elif idx < len(m_wind_waves) and m_wind_waves[idx] is not None:
+                        final_waves.append(m_wind_waves[idx])
+                    else:
+                        final_waves.append(None)
+
+                df_marine = pd.DataFrame({
+                    "datetime": pd.to_datetime(m_times),
+                    "wave_height": final_waves
+                })
+                break
+        except Exception as e:
+            print(f"地点 {loc['name']} からの波高データ取得スキップ: {e}")
+            continue
+
+    if df_marine is not None:
         return pd.merge(df_forecast, df_marine, on="datetime", how="left")
     else:
+        print("警告: すべてのバックアップ地点から波高データが取得できませんでした。")
         df_forecast["wave_height"] = None
         return df_forecast
 
 def calculate_flight_risk(wave, wind, visibility, vessel_type="ferry"):
     """
     羽幌沿海フェリー安全運航基準（regulations02.pdf）に基づく運航判定
+    基準を超過・注意した具体的な理由（風速・波高・視界）を合わせて返します。
     """
     if pd.isna(wind):
-        return "データなし", "gray", 0
+        return "データなし", "#6c757d", "#ffffff", 0  # テキスト色, 背景色
 
-    # 波高データがない場合は 0.0 として安全側に倒す
     wave_val = wave if not pd.isna(wave) else 0.0
 
     if vessel_type == "high_speed":
@@ -118,15 +141,40 @@ def calculate_flight_risk(wave, wind, visibility, vessel_type="ferry"):
     warn_vis = 1000.0   # 注意視界 (m)
     vis_meters = visibility if (not pd.isna(visibility) and visibility is not None) else 10000.0
 
-    # 運航中止限界条件（規約基準超過）
-    if wind >= limit_wind or wave_val >= limit_wave or vis_meters <= limit_vis:
-        return "欠航警戒（基準超過）", "red", 95
-    # 運航注意条件
-    elif wind >= warn_wind or wave_val >= warn_wave or vis_meters <= warn_vis:
-        return "運航注意（出港慎重）", "yellow", 60
-    # 通常運航
+    # 超過／注意要素の抽出
+    exceeded_limits = []
+    warned_limits = []
+
+    if wind >= limit_wind:
+        exceeded_limits.append("風速")
+    elif wind >= warn_wind:
+        warned_limits.append("風速")
+
+    if wave_val >= limit_wave:
+        exceeded_limits.append("波高")
+    elif wave_val >= warn_wave:
+        warned_limits.append("波高")
+
+    if vis_meters <= limit_vis:
+        exceeded_limits.append("視界")
+    elif vis_meters <= warn_vis:
+        warned_limits.append("視界")
+
+    # 1. 運航中止限界条件 (赤系)
+    if exceeded_limits:
+        reason_str = "・".join(exceeded_limits)
+        status_text = f"欠航警戒（{reason_str}超過）"
+        return status_text, "#721c24", "#f8d7da", 95  # 文字: 濃い赤, 背景: 薄い赤
+
+    # 2. 運航注意条件 (アンバー/オレンジ系)
+    elif warned_limits:
+        reason_str = "・".join(warned_limits)
+        status_text = f"運航注意（{reason_str}注意）"
+        return status_text, "#856404", "#fff3cd", 60  # 文字: 濃い茶/アンバー, 背景: マイルドイエロー
+
+    # 3. 通常運航 (緑系)
     else:
-        return "通常運航", "green", 10
+        return "通常運航", "#155724", "#d4edda", 10  # 文字: 濃い緑, 背景: 薄い緑
 
 def process_forecast_data(df_hourly):
     """第1便（08-12時）と第2便（14-18時）それぞれでピーク気象値を判定"""
@@ -148,9 +196,9 @@ def process_forecast_data(df_hourly):
             wave1 = df_f1["wave_height"].max() if "wave_height" in df_f1 and df_f1["wave_height"].notna().any() else None
             wind1 = df_f1["wind_speed"].max()
             vis1 = df_f1["visibility"].min()
-            status1, color1, prob1 = calculate_flight_risk(wave1, wind1, vis1)
+            status1, text_color1, bg_color1, prob1 = calculate_flight_risk(wave1, wind1, vis1)
         else:
-            wave1, wind1, vis1, status1, color1, prob1 = None, None, None, "データなし", "gray", 0
+            wave1, wind1, vis1, status1, text_color1, bg_color1, prob1 = None, None, None, "データなし", "#6c757d", "#e2e3e5", 0
 
         # 第2便 (14:00 〜 18:00)
         df_f2 = df_day[(df_day["hour"] >= 14) & (df_day["hour"] <= 18)]
@@ -158,14 +206,14 @@ def process_forecast_data(df_hourly):
             wave2 = df_f2["wave_height"].max() if "wave_height" in df_f2 and df_f2["wave_height"].notna().any() else None
             wind2 = df_f2["wind_speed"].max()
             vis2 = df_f2["visibility"].min()
-            status2, color2, prob2 = calculate_flight_risk(wave2, wind2, vis2)
+            status2, text_color2, bg_color2, prob2 = calculate_flight_risk(wave2, wind2, vis2)
         else:
-            wave2, wind2, vis2, status2, color2, prob2 = None, None, None, "データなし", "gray", 0
+            wave2, wind2, vis2, status2, text_color2, bg_color2, prob2 = None, None, None, "データなし", "#6c757d", "#e2e3e5", 0
             
         results.append({
             "date": d,
-            "wave1": wave1, "wind1": wind1, "vis1": vis1, "status1": status1, "color1": color1, "prob1": prob1,
-            "wave2": wave2, "wind2": wind2, "vis2": vis2, "status2": status2, "color2": color2, "prob2": prob2
+            "wave1": wave1, "wind1": wind1, "vis1": vis1, "status1": status1, "tc1": text_color1, "bg1": bg_color1, "prob1": prob1,
+            "wave2": wave2, "wind2": wind2, "vis2": vis2, "status2": status2, "tc2": text_color2, "bg2": bg_color2, "prob2": prob2
         })
         
     return pd.DataFrame(results)
@@ -225,21 +273,24 @@ def generate_html(df_summary):
         date = row["date"]
         
         v1_str = f"{row['vis1']/1000:.1f}km" if row["vis1"] is not None else "-"
-        w1_str = f"{row['wave1']:.1f}m" if row["wave1"] is not None else "データなし"
+        w1_str = f"{row['wave1']:.1f}m" if row["wave1"] is not None else "取得不可"
         wind1_str = f"{row['wind1']:.1f}m/s" if row["wind1"] is not None else "-"
-        s1 = f'<span style="color:{row["color1"]}; font-weight:bold;">{row["status1"]}</span>'
+        
+        # 視認性を高めたバッジ表示スタイル
+        s1 = f'<span style="color:{row["tc1"]}; background-color:{row["bg1"]}; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">{row["status1"]}</span>'
         
         v2_str = f"{row['vis2']/1000:.1f}km" if row["vis2"] is not None else "-"
-        w2_str = f"{row['wave2']:.1f}m" if row["wave2"] is not None else "データなし"
+        w2_str = f"{row['wave2']:.1f}m" if row["wave2"] is not None else "取得不可"
         wind2_str = f"{row['wind2']:.1f}m/s" if row["wind2"] is not None else "-"
-        s2 = f'<span style="color:{row["color2"]}; font-weight:bold;">{row["status2"]}</span>'
+        
+        s2 = f'<span style="color:{row["tc2"]}; background-color:{row["bg2"]}; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">{row["status2"]}</span>'
         
         forecast_rows += f"""
         <tr>
-            <td>{date}</td>
-            <td>{w1_str} / {wind1_str} (視界:{v1_str})</td>
+            <td><strong>{date}</strong></td>
+            <td>波高: {w1_str} / 風速: {wind1_str} <br><small style="color:#666;">視界: {v1_str}</small></td>
             <td>{s1}</td>
-            <td>{w2_str} / {wind2_str} (視界:{v2_str})</td>
+            <td>波高: {w2_str} / 風速: {wind2_str} <br><small style="color:#666;">視界: {v2_str}</small></td>
             <td>{s2}</td>
         </tr>
         """
@@ -254,41 +305,50 @@ def generate_html(df_summary):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>羽幌沿海フェリー 便別欠航予測ダッシュボード</title>
         <style>
-            body {{ font-family: sans-serif; margin: 20px; line-height: 1.6; color: #333; }}
-            h1, h2 {{ color: #2c3e50; }}
-            .notice {{ background-color: #eef6ff; padding: 12px 15px; border-left: 5px solid #0066cc; margin-bottom: 20px; }}
-            table {{ border-collapse: collapse; width: 100%; max-width: 950px; margin-bottom: 30px; }}
-            th, td {{ border: 1px solid #ccc; padding: 10px; text-align: center; }}
-            th {{ background-color: #f4f4f4; }}
-            .past-records {{ width: 100%; max-width: 950px; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 20px; line-height: 1.6; color: #212529; background-color: #f8f9fa; }}
+            .container {{ max-width: 1000px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            h1, h2 {{ color: #1a252f; border-bottom: 2px solid #e9ecef; padding-bottom: 8px; }}
+            .notice {{ background-color: #e7f5ff; padding: 12px 15px; border-left: 5px solid #1c7ed6; margin-bottom: 20px; border-radius: 4px; }}
+            table {{ border-collapse: collapse; width: 100%; margin-bottom: 30px; background-color: #fff; }}
+            th, td {{ border: 1px solid #dee2e6; padding: 12px; text-align: center; vertical-align: middle; }}
+            th {{ background-color: #f1f3f5; color: #495057; font-weight: 600; }}
+            .past-records table {{ width: 100%; }}
         </style>
     </head>
     <body>
-        <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
-        <div class="notice">
-            <strong>【運航管理規約 準拠判定】</strong><br>
-            規約（regulations02.pdf）に定められた限界値（フェリーおろろん2: 風速15m/s、波高2.5m、視界500m）に基づき自動判定を行っています。
+        <div class="container">
+            <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
+            <div class="notice">
+                <strong>【運航管理規約 準拠判定】</strong><br>
+                規約（regulations02.pdf）に定められた限界値（フェリーおろろん2: 風速15m/s、波高2.5m、視界500m）に基づき自動判定を行っています。
+            </div>
+            <p style="color:#6c757d; font-size:0.9em;">最終更新: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (JST)</p>
+            
+            <h2>フェリー週間欠航予測（便別）</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2" style="width: 15%;">日付</th>
+                        <th colspan="2" style="width: 42.5%;">第1便（午前便）</th>
+                        <th colspan="2" style="width: 42.5%;">第2便（午後便）</th>
+                    </tr>
+                    <tr>
+                        <th>気象データ</th>
+                        <th>予測判定</th>
+                        <th>気象データ</th>
+                        <th>予測判定</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {forecast_rows}
+                </tbody>
+            </table>
+            
+            <h2>過去の運航・欠航実績 (直近10件)</h2>
+            <div class="past-records">
+                {past_records_html}
+            </div>
         </div>
-        <p>最終更新: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (JST)</p>
-        
-        <h2>フェリー週間欠航予測（便別）</h2>
-        <table>
-            <tr>
-                <th rowspan="2">日付</th>
-                <th colspan="2">第1便（午前便）</th>
-                <th colspan="2">第2便（午後便）</th>
-            </tr>
-            <tr>
-                <th>気象（波高 / 風速 / 視界）</th>
-                <th>予測判定</th>
-                <th>気象（波高 / 風速 / 視界）</th>
-                <th>予測判定</th>
-            </tr>
-            {forecast_rows}
-        </table>
-        
-        <h2>過去の運航・欠航実績 (直近10件)</h2>
-        {past_records_html}
     </body>
     </html>
     """
@@ -300,7 +360,7 @@ def main():
     print("データベース初期化中...")
     setup_database()
     
-    print("気象・海洋データ取得中 (Open-Meteo API)...")
+    print("気象・海洋データ取得中 (Open-Meteo API 多重取得)...")
     df_hourly = fetch_combined_weather_data()
     
     if df_hourly.empty:
