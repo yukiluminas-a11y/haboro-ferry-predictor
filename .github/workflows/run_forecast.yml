@@ -45,8 +45,10 @@ jobs:
             git push origin main
           fi
 
-      - name: GitHub Pagesへ自動デプロイ
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Pages ページのアップロード
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
+          path: ./
+
+      - name: GitHub Pages へ直接デプロイ
+        uses: actions/deploy-pages@v4
