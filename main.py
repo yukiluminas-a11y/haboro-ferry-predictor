@@ -38,6 +38,7 @@ def setup_database():
 def fetch_combined_weather_data():
     """
     Open-Meteo から気象（風速・視程）と海洋（波高）データを複数バックアップ地点から確実に取得
+    ★Windy.comと同一条件（ECMWFモデル / m/s単位固定）に設定
     """
     headers = {'User-Agent': 'FerryForecastApp/1.0'}
     
@@ -46,7 +47,9 @@ def fetch_combined_weather_data():
     forecast_params = {
         "latitude": LOCATION_CANDIDATES[0]["lat"],
         "longitude": LOCATION_CANDIDATES[0]["lon"],
-        "hourly": ["wind_speed_10m", "visibility"],
+        "hourly": ["wind_speed_10m", "wind_gusts_10m", "visibility"],
+        "models": "ecmwf_ifs025",        # ★Windy.comと同じECMWFモデルを明示指定
+        "wind_speed_unit": "ms",         # ★単位を m/s に明示的に固定
         "timezone": "Asia/Tokyo"
     }
     
@@ -77,6 +80,7 @@ def fetch_combined_weather_data():
             "latitude": loc["lat"],
             "longitude": loc["lon"],
             "hourly": ["wave_height", "wind_wave_height", "swell_wave_height"],
+            "models": "ecmwf_wam",      # ★海洋波浪データもECMWFモデルに統一
             "timezone": "Asia/Tokyo"
         }
         try:
@@ -92,7 +96,7 @@ def fetch_combined_weather_data():
             # 波高データが存在するかチェック
             valid_waves = [w for w in m_waves if w is not None]
             if m_times and len(valid_waves) > 0:
-                print(f"波高データを正常取得しました (使用座標: {loc['name']})")
+                print(f"波高データを正常取得しました (使用座標: {loc['name']} / モデル: ECMWF)")
                 
                 # バックアップ処理: wave_height が None の場合は wind_wave_height で補完
                 final_waves = []
@@ -126,7 +130,7 @@ def calculate_flight_risk(wave, wind, visibility, vessel_type="ferry"):
     基準を超過・注意した具体的な理由（風速・波高・視界）を合わせて返します。
     """
     if pd.isna(wind):
-        return "データなし", "#6c757d", "#ffffff", 0  # テキスト色, 背景色
+        return "データなし", "#6c757d", "#ffffff", 0
 
     wave_val = wave if not pd.isna(wave) else 0.0
 
@@ -164,17 +168,17 @@ def calculate_flight_risk(wave, wind, visibility, vessel_type="ferry"):
     if exceeded_limits:
         reason_str = "・".join(exceeded_limits)
         status_text = f"欠航警戒（{reason_str}超過）"
-        return status_text, "#721c24", "#f8d7da", 95  # 文字: 濃い赤, 背景: 薄い赤
+        return status_text, "#721c24", "#f8d7da", 95
 
     # 2. 運航注意条件 (アンバー/オレンジ系)
     elif warned_limits:
         reason_str = "・".join(warned_limits)
         status_text = f"運航注意（{reason_str}注意）"
-        return status_text, "#856404", "#fff3cd", 60  # 文字: 濃い茶/アンバー, 背景: マイルドイエロー
+        return status_text, "#856404", "#fff3cd", 60
 
     # 3. 通常運航 (緑系)
     else:
-        return "通常運航", "#155724", "#d4edda", 10  # 文字: 濃い緑, 背景: 薄い緑
+        return "通常運航", "#155724", "#d4edda", 10
 
 def process_forecast_data(df_hourly):
     """第1便（08-12時）と第2便（14-18時）それぞれでピーク気象値を判定"""
@@ -276,7 +280,6 @@ def generate_html(df_summary):
         w1_str = f"{row['wave1']:.1f}m" if row["wave1"] is not None else "取得不可"
         wind1_str = f"{row['wind1']:.1f}m/s" if row["wind1"] is not None else "-"
         
-        # 視認性を高めたバッジ表示スタイル
         s1 = f'<span style="color:{row["tc1"]}; background-color:{row["bg1"]}; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">{row["status1"]}</span>'
         
         v2_str = f"{row['vis2']/1000:.1f}km" if row["vis2"] is not None else "-"
@@ -319,8 +322,9 @@ def generate_html(df_summary):
         <div class="container">
             <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
             <div class="notice">
-                <strong>【運航管理規約 準拠判定】</strong><br>
-                規約（regulations02.pdf）に定められた限界値（フェリーおろろん2: 風速15m/s、波高2.5m、視界500m）に基づき自動判定を行っています。
+                <strong>【データソース・判定基準】</strong><br>
+                ・気象予測モデル: <strong>ECMWF（Windy.com準拠）</strong><br>
+                ・運航基準: 安全運航規約（regulations02.pdf）限界値（風速15m/s、波高2.5m、視界500m）
             </div>
             <p style="color:#6c757d; font-size:0.9em;">最終更新: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (JST)</p>
             
@@ -360,7 +364,7 @@ def main():
     print("データベース初期化中...")
     setup_database()
     
-    print("気象・海洋データ取得中 (Open-Meteo API 多重取得)...")
+    print("気象・海洋データ取得中 (Open-Meteo API / ECMWFモデル)...")
     df_hourly = fetch_combined_weather_data()
     
     if df_hourly.empty:
