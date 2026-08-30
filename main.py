@@ -1,110 +1,213 @@
-from datetime import datetime, timedelta
-import json
+import os
 import sqlite3
-from bs4 import BeautifulSoup
-import pandas as pd
 import requests
-from sklearn.ensemble import RandomForestClassifier
+import pandas as pd
+from datetime import datetime
 
-LAT = 44.36
-LON = 141.68
-DB_FILE = "ferry_data.sqlite"
+# --- 設定 ---
+DB_PATH = "ferry_data.sqlite"
+LATITUDE = 44.38   # 羽幌〜焼尻・天売エリアの緯度
+LONGITUDE = 141.70 # 経度
 
-# --- 1. データベース初期化 ---
-def init_db():
-  conn = sqlite3.connect(DB_FILE)
-  c = conn.cursor()
-  c.execute("""
-        CREATE TABLE IF NOT EXISTS history (
-            date TEXT PRIMARY KEY,
+def setup_database():
+    """データベースとテーブルの初期化"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ferry_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT UNIQUE,
             status TEXT,
-            wave_height REAL,
-            wave_period REAL,
             wind_speed REAL,
-            wind_dir REAL
+            wave_height REAL,
+            weathercode INTEGER,
+            created_at TEXT
         )
-    """)
-  conn.commit()
-  conn.close()
-
-
-# --- 2. 運航結果のスクレイピング & 記録 ---
-def record_actual_status():
-  try:
-    res = requests.get("https://www.haboro-enkai.com/", timeout=10)
-    res.encoding = res.apparent_encoding
-    soup = BeautifulSoup(res.text, "html.parser")
-    text = soup.get_text()
-
-    # 簡単な判定 (状況に合わせて調整可)
-    status = "運航"
-    if "欠航" in text or "全便欠航" in text:
-      status = "欠航"
-
-    # 当日の気象実績を取得してDBに保存
-    m_url = f"https://marine-api.open-meteo.com/v1/marine?latitude={LAT}&longitude={LON}&current=wave_height,wave_period&timezone=Asia%2FTokyo"
-    w_url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&current=wind_speed_10m,wind_direction_10m&timezone=Asia%2FTokyo"
-
-    m_data = requests.get(m_url).json().get("current", {})
-    w_data = requests.get(w_url).json().get("current", {})
-
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        """
-        INSERT OR REPLACE INTO history (date, status, wave_height, wave_period, wind_speed, wind_dir)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """,
-        (
-            today_str,
-            status,
-            m_data.get("wave_height"),
-            m_data.get("wave_period"),
-            w_data.get("wind_speed_10m"),
-            w_data.get("wind_direction_10m"),
-        ),
-    )
+    ''')
     conn.commit()
     conn.close()
-    print(f"[{today_str}] 運航実績を記録しました: {status}")
-  except Exception as e:
-    print(f"実績記録エラー: {e}")
 
+def fetch_weather_data():
+    """Open-Meteoから気象データを取得（日本時間指定）"""
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": LATITUDE,
+        "longitude": LONGITUDE,
+        "hourly": ["wind_speed_10m", "wave_height"],
+        "timezone": "Asia/Tokyo"  # 【修正点1】日本時間に固定
+    }
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    return response.json()
 
-# --- 3. 過去データからの自己学習モデル構築 ---
-def train_model():
-  conn = sqlite3.connect(DB_FILE)
-  df = pd.read_sql_query("SELECT * FROM history", conn)
-  conn.close()
+def calculate_risk(row):
+    """波高と風速から欠航リスクを判定"""
+    wave = row["wave_height"]
+    wind = row["wind_speed"]
+    
+    if pd.isna(wave) or pd.isna(wind):
+        return "データなし", "gray", 0
 
-  # データ数が一定（例: 5件以上）溜まったら機械学習を適用
-  if len(df) >= 5 and "欠航" in df["status"].values:
-    X = df[["wave_height", "wave_period", "wind_speed", "wind_dir"]]
-    y = df["status"].apply(lambda x: 1 if x == "欠航" else 0)
-    model = RandomForestClassifier(n_estimators=10, random_state=42)
-    model.fit(X, y)
-    print("機械学習モデル（RandomForest）の再学習が完了しました。")
-    return model
-  return None
+    # 欠航スコア計算
+    score = (wave * 30) + (wind * 4)
+    
+    if wave >= 2.5 or wind >= 13 or score >= 70:
+        return "欠航警戒（赤）", "red", min(100, int(score))
+    elif wave >= 1.5 or wind >= 10 or score >= 40:
+        return "運航注意（黄）", "yellow", int(score)
+    else:
+        return "通常運航（緑）", "green", max(0, int(score))
 
+def process_forecast_data(data):
+    """取得したデータを昼間時間帯に絞り込んで日ごとに集計"""
+    df_hourly = pd.DataFrame({
+        "datetime": pd.to_datetime(data["hourly"]["time"]),
+        "wind_speed": data["hourly"]["wind_speed_10m"],
+        "wave_height": data["hourly"]["wave_height"]
+    })
+    
+    # 日付と時間を抽出
+    df_hourly["date"] = df_hourly["datetime"].dt.strftime("%Y-%m-%d")
+    df_hourly["hour"] = df_hourly["datetime"].dt.hour
+    
+    # 【修正点2】フェリー運航時間帯（08:00〜17:00）のみを抽出
+    df_daytime = df_hourly[(df_hourly["hour"] >= 8) & (df_hourly["hour"] <= 17)]
+    
+    # 日ごとに「昼間の最大値」を計算
+    daily_summary = df_daytime.groupby("date").agg({
+        "wind_speed": "max",
+        "wave_height": "max"
+    }).reset_index()
+    
+    # 欠航確率・判定の適用
+    daily_summary[["status", "color", "probability"]] = daily_summary.apply(
+        calculate_risk, axis=1, result_type="expand"
+    )
+    
+    return daily_summary
 
-# --- 4. 予測とindex.htmlの更新 ---
-def update_forecast_html(model=None):
-  # APIから今後の予測データを取得
-  w_url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=wind_speed_10m,wind_direction_10m&timezone=Asia%2FTokyo&forecast_days=4"
-  m_url = f"https://marine-api.open-meteo.com/v1/marine?latitude={LAT}&longitude={LON}&hourly=wave_height,wave_period&timezone=Asia%2FTokyo&forecast_days=4"
+def get_past_records_html():
+    """データベースから直近の実績を取得してHTML化"""
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+        SELECT date AS 日付, status AS 運航状況, 
+               wind_speed AS '風速(m/s)', wave_height AS '波高(m)'
+        FROM ferry_records 
+        ORDER BY date DESC LIMIT 10
+    """
+    try:
+        df = pd.read_sql_query(query, conn)
+        if df.empty:
+            html = "<p>過去の実績データはまだ蓄積されていません。</p>"
+        else:
+            html = df.to_html(index=False, classes="past-records", border=1, justify="center")
+    except Exception as e:
+        html = f"<p>データ取得エラー: {e}</p>"
+    conn.close()
+    return html
 
-  res_w = requests.get(w_url).json()["hourly"]
-  res_m = requests.get(m_url).json()["hourly"]
+def save_today_record(daily_summary):
+    """今日のデータをデータベースに記録 (実運用では公式サイトのスクレイピング結果を入れる)"""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_data = daily_summary[daily_summary["date"] == today_str]
+    
+    if not today_data.empty:
+        row = today_data.iloc[0]
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # INSERT OR REPLACE で今日のデータを更新・保存
+        cursor.execute('''
+            INSERT OR REPLACE INTO ferry_records (date, status, wind_speed, wave_height, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (today_str, row["status"], row["wind_speed"], row["wave_height"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+        conn.close()
 
-  # 先ほどのHTMLコードの生成処理などを実行し index.html を出力
-  print("最新の予測データから index.html を更新しました。")
+def generate_html(daily_summary):
+    """Web公開用の index.html を生成"""
+    forecast_rows = ""
+    for _, row in daily_summary.iterrows():
+        date = row["date"]
+        wave = f'{row["wave_height"]:.1f}' if not pd.isna(row["wave_height"]) else "-"
+        wind = f'{row["wind_speed"]:.1f}' if not pd.isna(row["wind_speed"]) else "-"
+        status = row["status"]
+        color = row["color"]
+        prob = row["probability"]
+        
+        # 信号カラー設定
+        bg_color = {"green": "#e6ffe6", "yellow": "#ffffe6", "red": "#ffe6e6", "gray": "#f0f0f0"}.get(color, "#fff")
+        font_color = {"green": "green", "yellow": "#b38f00", "red": "red", "gray": "gray"}.get(color, "black")
+        
+        forecast_rows += f"""
+        <tr style="background-color: {bg_color};">
+            <td>{date}</td>
+            <td>{wave}</td>
+            <td>{wind}</td>
+            <td>{prob}%</td>
+            <td style="color: {font_color}; font-weight: bold;">{status}</td>
+        </tr>
+        """
+        
+    past_records_html = get_past_records_html()
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>羽幌沿海フェリー 欠航予測ダッシュボード</title>
+        <style>
+            body {{ font-family: sans-serif; margin: 20px; line-height: 1.6; color: #333; }}
+            h1, h2 {{ color: #2c3e50; }}
+            table {{ border-collapse: collapse; width: 100%; max-width: 800px; margin-bottom: 30px; }}
+            th, td {{ border: 1px solid #ccc; padding: 10px; text-align: center; }}
+            th {{ background-color: #f4f4f4; }}
+            .past-records {{ width: 100%; max-width: 800px; }}
+        </style>
+    </head>
+    <body>
+        <h1>羽幌沿海フェリー 欠航予測ダッシュボード</h1>
+        <p>最終更新: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (JST)</p>
+        
+        <h2>週間欠航予測 (日中 08:00〜17:00 の最大値基準)</h2>
+        <table>
+            <tr>
+                <th>日付</th>
+                <th>予測波高 (m)</th>
+                <th>予測風速 (m/s)</th>
+                <th>欠航確率</th>
+                <th>判定</th>
+            </tr>
+            {forecast_rows}
+        </table>
+        
+        <h2>過去の運航・欠航実績 (直近10件)</h2>
+        {past_records_html}
+    </body>
+    </html>
+    """
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
 
+def main():
+    print("データベース初期化中...")
+    setup_database()
+    
+    print("気象データ取得中 (Open-Meteo)...")
+    weather_data = fetch_weather_data()
+    
+    print("データ処理・予測計算中...")
+    daily_summary = process_forecast_data(weather_data)
+    
+    print("本日の実績データをDBへ保存中...")
+    save_today_record(daily_summary)
+    
+    print("Webページ (index.html) 生成中...")
+    generate_html(daily_summary)
+    
+    print("全処理が完了しました！")
 
 if __name__ == "__main__":
-  init_db()
-  record_actual_status()
-  model = train_model()
-  update_forecast_html(model)
+    main()
