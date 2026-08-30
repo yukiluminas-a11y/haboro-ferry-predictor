@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>羽幌沿海フェリー 3日間運航予測ダッシュボード</title>
+    <style>
+        :root {
+            --primary: #1a568c;
+            --bg: #f4f7f9;
+            --card-bg: #ffffff;
+            --text: #2c3e50;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+            --safe-bg: #dcfce7;
+            --safe-text: #15803d;
+            --warning-bg: #fef9c3;
+            --warning-text: #a16207;
+            --danger-bg: #fee2e2;
+            --danger-text: #b91c1c;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 24px 16px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+            padding: 28px;
+            box-sizing: border-box;
+        }
+
+        .header {
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: var(--primary);
+            margin: 0 0 8px 0;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .meta {
+            font-size: 13px;
+            color: var(--text-light);
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-light);
+            font-size: 16px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary);
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: 10px;
+        }
+
+        th {
+            background-color: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+            font-size: 13px;
+            padding: 12px 10px;
+            text-align: center;
+            border-bottom: 2px solid var(--border);
+        }
+
+        td {
+            padding: 14px 10px;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+            font-size: 14px;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .date-cell {
+            font-weight: bold;
+            color: #1e293b;
+        }
+
+        .time-label {
+            font-size: 12px;
+            color: var(--text-light);
+            font-weight: normal;
+        }
+
+        .badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            display: inline-block;
+            min-width: 90px;
+        }
+
+        .safe { background-color: var(--safe-bg); color: var(--safe-text); }
+        .warning { background-color: var(--warning-bg); color: var(--warning-text); }
+        .danger { background-color: var(--danger-bg); color: var(--danger-text); }
+
+        .env-metrics {
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.5;
+        }
+
+        .env-val {
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .legend {
+            margin-top: 24px;
+            padding: 16px;
+            background-color: #f8fafc;
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--text-light);
+            line-height: 1.6;
+        }
+
+        .legend-title {
+            font-weight: bold;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>🚢 羽幌沿海フェリー 3日間運航予測</h1>
+        <div class="meta">
+            <span>予測対象：羽幌港 〜 焼尻島 〜 天売島 航路</span>
+            <span id="update-time">データ取得中...</span>
+        </div>
+    </div>
+
+    <div id="content">
+        <div class="loading">
+            <div class="spinner"></div>
+            気象データ（Open-Meteo Weather API）および海象データ（Marine API）を取得中...
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-title">💡 予測判定基準について（精度調整版）</div>
+        ・<strong>高精度複合判定：</strong>「波高」「風速」に加え、「波の周期（長周期うねり）」および「西〜北西からの直撃風（風向補正）」を加味して自動算出しています。<br>
+        ・<strong>フェリー（おろろん2）：</strong>波高 2.2m 以上、風速 13m/s 以上、または波高 1.6m ＋ うねり（周期8s以上）で欠航確率高。<br>
+        ・<strong>高速船（さんらいなぁ）：</strong>波高 1.6m 以上、風速 11m/s 以上、または波高 1.2m ＋ うねり（周期7.5s以上）で欠航確率高。
+    </div>
+</div>
+
+<script>
+    // 羽幌沖（北緯44.36, 東経141.68）の座標設定
+    const LAT = 44.36;
+    const LON = 141.68;
+
+    async function fetchForecastData() {
+        try {
+            // ソース1: 気象API (風速・風向)
+            const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=wind_speed_10m,wind_direction_10m&timezone=Asia%2FTokyo&forecast_days=4`;
+            
+            // ソース2: 波浪API (波高・周期・波向)
+            const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${LAT}&longitude=${LON}&hourly=wave_height,wave_period,wave_direction&timezone=Asia%2FTokyo&forecast_days=4`;
+
+            const [resWeather, resMarine] = await Promise.all([
+                fetch(weatherUrl).then(r => r.json()),
+                fetch(marineUrl).then(r => r.json())
+            ]);
+
+            processAndRender(resWeather.hourly, resMarine.hourly);
+        } catch (error) {
+            document.getElementById('content').innerHTML = `<p style="color:red; text-align:center;">データの取得に失敗しました。インターネット接続を確認してください。</p>`;
+            console.error(error);
+        }
+    }
+
+    // 改善された判定関数
+    function predictStatus(wave, period, wind, windDir) {
+        wave = wave || 0;
+        period = period || 0;
+        wind = wind || 0;
+        windDir = windDir || 0;
+
+        // 日本海側からの直撃風（西〜北西: 240度〜330度）は体感風速・波浪への影響を1.2倍に補正
+        let windImpact = wind;
+        if (windDir >= 240 && windDir <= 330) {
+            windImpact *= 1.2;
+        }
+
+        // --- フェリー (おろろん2) 判定ロジック ---
+        let ferryStatus = "通常運航";
+        let ferryClass = "safe";
+
+        if (wave >= 2.2 || windImpact >= 13.0 || (wave >= 1.6 && period >= 8.0)) {
+            ferryStatus = "欠航確率 高";
+            ferryClass = "danger";
+        } else if (wave >= 1.5 || windImpact >= 10.0 || (wave >= 1.2 && period >= 7.0)) {
+            ferryStatus = "条件付 / 注意";
+            ferryClass = "warning";
+        }
+
+        // --- 高速船 (さんらいなぁ) 判定ロジック ---
+        let fastStatus = "通常運航";
+        let fastClass = "safe";
+
+        if (wave >= 1.6 || windImpact >= 11.0 || (wave >= 1.2 && period >= 7.5)) {
+            fastStatus = "欠航確率 高";
+            fastClass = "danger";
+        } else if (wave >= 1.0 || windImpact >= 8.0 || (wave >= 0.8 && period >= 6.5)) {
+            fastStatus = "条件付 / 注意";
+            fastClass = "warning";
+        }
+
+        return { ferryStatus, ferryClass, fastStatus, fastClass };
+    }
+
+    function processAndRender(weather, marine) {
+        const timeList = weather.time;
+        const forecasts = [];
+
+        const today = new Date();
+        const datesToInclude = [];
+        for (let i = 0; i < 4; i++) {
+            const d = new Date(today);
+            d.setDate(today.getDate() + i);
+            datesToInclude.push(d.toISOString().split('T')[0]);
+        }
+
+        for (let i = 0; i < timeList.length; i++) {
+            const timeStr = timeList[i];
+            const datePart = timeStr.split('T')[0];
+            const hourPart = parseInt(timeStr.split('T')[1].split(':')[0]);
+
+            // 対象日かつ「08:00 (朝便)」または「13:00 (昼便)」のみピックアップ
+            if (datesToInclude.includes(datePart) && (hourPart === 8 || hourPart === 13)) {
+                const wave = marine.wave_height[i];
+                const period = marine.wave_period[i];
+                const wind = weather.wind_speed_10m[i];
+                const windDir = weather.wind_direction_10m[i];
+
+                const status = predictStatus(wave, period, wind, windDir);
+
+                const dateObj = new Date(timeStr);
+                const dayOfWeek = ["日", "月", "火", "水", "木", "金", "土"][dateObj.getDay()];
+                const formattedDate = `${dateObj.getMonth() + 1}/${dateObj.getDate()} (${dayOfWeek})`;
+
+                forecasts.push({
+                    dateStr: formattedDate,
+                    timeName: hourPart === 8 ? "朝便 (08:00頃)" : "昼便 (13:00頃)",
+                    wave: wave !== null ? wave.toFixed(1) : "-",
+                    period: period !== null ? period.toFixed(1) : "-",
+                    wind: wind !== null ? wind.toFixed(1) : "-",
+                    ...status
+                });
+            }
+        }
+
+        // テーブルHTML生成
+        let html = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>日時 / 便</th>
+                        <th>海象予測 (波高・周期・風速)</th>
+                        <th>フェリー<br><small style="font-weight:normal">(おろろん2)</small></th>
+                        <th>高速船<br><small style="font-weight:normal">(さんらいなぁ)</small></th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        forecasts.forEach(f => {
+            html += `
+                <tr>
+                    <td>
+                        <div class="date-cell">${f.dateStr}</div>
+                        <div class="time-label">${f.timeName}</div>
+                    </td>
+                    <td class="env-metrics">
+                        🌊 波高: <span class="env-val">${f.wave} m</span> (${f.period}s)<br>
+                        🍃 風速: <span class="env-val">${f.wind} m/s</span>
+                    </td>
+                    <td><span class="badge ${f.ferryClass}">${f.ferryStatus}</span></td>
+                    <td><span class="badge ${f.fastClass}">${f.fastStatus}</span></td>
+                </tr>
+            `;
+        });
+
+        html += `</tbody></table>`;
+
+        document.getElementById('content').innerHTML = html;
+        document.getElementById('update-time').innerText = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+    }
+
+    // 初期実行
+    fetchForecastData();
+</script>
+
+</body>
+</html>
