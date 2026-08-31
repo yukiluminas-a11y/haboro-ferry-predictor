@@ -2,8 +2,10 @@ name: Daily Ferry Forecast Auto-Learner
 
 on:
   schedule:
-    - cron: '30 21 * * *'
-    - cron: '30 4 * * *'
+    # 1回目: 朝7:00 JST (前日22:00 UTC) -> 1日の開始時に気象予測を先行生成
+    - cron: '0 22 * * *'
+    # 2回目: 朝9:15 JST (当日00:15 UTC) -> 公式発表の更新後に実績を自動取得・DB同期
+    - cron: '15 0 * * *'
   workflow_dispatch:
 
 jobs:
