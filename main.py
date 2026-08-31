@@ -21,7 +21,7 @@ WEATHER_MODELS = ["ecmwf_ifs025", "gfs_seamless", "icon_seamless", "jma_msm"]
 MARINE_MODELS = ["ecmwf_wam", "gfs_wave", "best_match"]
 
 # ==========================================
-# 1. データベース管理・初期化
+# 1. データベース管理・初期化（自動マイグレーション付き）
 # ==========================================
 def setup_database():
     """データベースおよびテーブルの初期化"""
@@ -43,26 +43,54 @@ def setup_database():
                 updated_at TEXT
             )
         ''')
+        
+        # 既存テーブルのカラム欠損チェックと補完 (マイグレーション)
+        cursor.execute("PRAGMA table_info(ferry_records)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        fields_to_add = {
+            "predicted_status": "TEXT",
+            "actual_status": "TEXT",
+            "max_wind_speed": "REAL",
+            "max_wave_height": "REAL",
+            "min_visibility": "REAL",
+            "raw_official_text": "TEXT",
+            "updated_at": "TEXT"
+        }
+        
+        for field, col_type in fields_to_add.items():
+            if field not in columns:
+                cursor.execute(f"ALTER TABLE ferry_records ADD COLUMN {field} {col_type}")
+                
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"データベース初期化エラー: {e}")
 
 # ==========================================
-# 2. 羽幌沿海フェリー公式サイトからの実績スクレイピング
+# 2. 羽幌沿海フェリー公式サイトからの実績スクレイピング (精密判定版)
 # ==========================================
 def parse_status_text(text):
-    """テキストから状態を判別"""
-    if "欠航" in text:
-        return "欠航"
-    elif "平常運航" in text or "通常運航" in text:
+    """
+    運航状況テキストから状態を精密判定
+    過去のお知らせに含まれる「欠航」テキストの誤検知を防ぎ、「平常運航」「全便運航」「欠航はありません」等の文脈を優先判定
+    """
+    cleaned_text = text.replace(" ", "").replace("\n", "").replace("\r", "")
+
+    # 平常運航・無欠航のキーワードを最優先判定
+    if any(k in cleaned_text for k in ["平常運航", "通常運航", "全便運航", "欠航はありません", "全便通常"]):
         return "平常運航"
-    elif "条件付" in text:
+    elif "全便欠航" in cleaned_text or "終日欠航" in cleaned_text:
+        return "欠航"
+    elif "条件付" in cleaned_text:
         return "条件付運航"
-    elif "見合わせ" in text:
+    elif "見合わせ" in cleaned_text:
         return "見合わせ"
+    elif "欠航" in cleaned_text:
+        return "欠航"
     else:
-        return "不明"
+        # 特別な異常記載がなければデフォルトは平常運航とする
+        return "平常運航"
 
 def fetch_actual_ferry_status():
     """公式サイトから本日の実際の運航結果を取得"""
@@ -75,7 +103,10 @@ def fetch_actual_ferry_status():
         res.raise_for_status()
         
         soup = BeautifulSoup(res.text, "html.parser")
-        page_text = soup.get_text()
+        
+        # 運航状況が含まれる主要エリアに絞り込み
+        main_content = soup.find("main") or soup.find("div", id="content") or soup.find("body") or soup
+        page_text = main_content.get_text()
         
         actual_status = parse_status_text(page_text)
         print(f"公式サイト実績取得成功: [{actual_status}]")
@@ -119,7 +150,6 @@ def fetch_weather_data():
             times, winds, vis = data.get("time", []), data.get("wind_speed_10m", []), data.get("visibility", [])
             
             if times and any(w is not None for w in winds):
-                # 視界のNaN対策
                 vis_clean = [v if (v is not None and not pd.isna(v)) else 10000.0 for v in vis]
                 df_forecast = pd.DataFrame({"datetime": pd.to_datetime(times), "wind_speed": winds, "visibility": vis_clean})
                 print(f"風速データ取得成功 (モデル: {model})")
@@ -287,12 +317,11 @@ def generate_accuracy_report_html():
         if df.empty or len(df) < 2:
             return "<p style='color:#6c757d;'>蓄積された実績データが十分でないため、精度分析は準備中です（データ数: 2件以上で自動表示）。</p>"
 
-        # 簡易精度判定ロジック
         correct = 0
         total = len(df)
         for _, row in df.iterrows():
-            pred = row["predicted_status"]
-            actual = row["actual_status"]
+            pred = str(row["predicted_status"])
+            actual = str(row["actual_status"])
             is_pred_cancel = "欠航" in pred
             is_actual_cancel = "欠航" in actual
             if is_pred_cancel == is_actual_cancel:
@@ -304,7 +333,7 @@ def generate_accuracy_report_html():
             <strong>【累積予測評価・傾向】</strong><br>
             ・解析データ件数: <strong>{total} 件</strong><br>
             ・欠航判定の適合率（精度）: <strong>{accuracy:.1f}%</strong><br>
-            <small style="color:#555;">※毎日の実績と気象モデル数値を照合し、自動計算されています。</small>
+            <small style="color:#555;">※毎日の実績と気象モデル数言を照合し、自動計算されています。</small>
         </div>
         """
     except Exception as e:
@@ -388,7 +417,7 @@ def generate_html(df_summary):
             <div class="notice">
                 <strong>【システム運用状態】</strong><br>
                 ・気象モデル: <strong>ECMWF (Windy互換) 多重冗長取得</strong><br>
-                ・実績学習機能: <strong>有効（毎日の公式結果と気象数値を紐付け保存中）</strong>
+                ・実績学習機能: <strong>有効（毎日の公式結果と気象数言を紐付け保存中）</strong>
             </div>
             <p style="color:#6c757d; font-size:0.9em;">最終更新: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (JST)</p>
             
