@@ -24,9 +24,9 @@
                 ・気象モデル: <strong>ECMWF (Windy互換) 多重冗長取得</strong><br>
                 ・実績学習機能: <strong>有効（毎日の公式結果と気象数値を紐付け保存中）</strong>
             </div>
-            <p style="color:#6c757d; font-size:0.9em;">最終更新: 2026-08-31 09:32:05 (JST)</p>
+            <p style="color:#6c757d; font-size:0.9em;">最終更新: 2026-08-31 09:34:06 (JST)</p>
             
-            <p>精度レポート生成エラー: Execution failed on sql 'SELECT * FROM ferry_records WHERE actual_status != '未取得' AND actual_status != '不明'': no such column: actual_status</p>
+            <p style='color:#6c757d;'>蓄積された実績データが十分でないため、精度分析は準備中です（データ数: 2件以上で自動表示）。</p>
 
             <h2>フェリー週間欠航予測（便別）</h2>
             <table>
@@ -106,15 +106,26 @@
             
             <h2>過去の運航実績・答え合わせ (直近10件)</h2>
             <div class="past-records">
-                <p>実績データの表示スキップ: Execution failed on sql '
-            SELECT date AS 日付, 
-                   predicted_status AS システム予測, 
-                   actual_status AS 公式実績, 
-                   max_wind_speed AS '最大風速(m/s)', 
-                   max_wave_height AS '最大波高(m)'
-            FROM ferry_records 
-            ORDER BY date DESC LIMIT 10
-        ': no such column: predicted_status</p>
+                <table border="1" class="dataframe past-records">
+  <thead>
+    <tr style="text-align: center;">
+      <th>日付</th>
+      <th>システム予測</th>
+      <th>公式実績</th>
+      <th>最大風速(m/s)</th>
+      <th>最大波高(m)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2026-08-31</td>
+      <td>1便:通常運航 / 2便:通常運航</td>
+      <td>欠航</td>
+      <td>4.88</td>
+      <td>0.27</td>
+    </tr>
+  </tbody>
+</table>
             </div>
         </div>
     </body>
