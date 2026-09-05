@@ -1,0 +1,175 @@
+
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>羽幌沿海フェリー 便別欠航予測・自動精度学習ダッシュボード</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 20px; line-height: 1.6; color: #212529; background-color: #f8f9fa; }
+            .container { max-width: 1000px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            h1, h2 { color: #1a252f; border-bottom: 2px solid #e9ecef; padding-bottom: 8px; }
+            .notice { background-color: #e7f5ff; padding: 12px 15px; border-left: 5px solid #1c7ed6; margin-bottom: 20px; border-radius: 4px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 30px; background-color: #fff; }
+            th, td { border: 1px solid #dee2e6; padding: 12px; text-align: center; vertical-align: middle; }
+            th { background-color: #f1f3f5; color: #495057; font-weight: 600; }
+            .past-records table { width: 100%; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>羽幌沿海フェリー 便別欠航予測ダッシュボード</h1>
+            <div class="notice">
+                <strong>【システム運用状態】</strong><br>
+                ・気象モデル: <strong>ECMWF (Windy互換) 多重冗長取得</strong><br>
+                ・実績学習機能: <strong>有効（毎日の公式結果と気象数言を紐付け保存中）</strong>
+            </div>
+            <p style="color:#6c757d; font-size:0.9em;">最終更新: 2026-09-05 00:36:46 (JST)</p>
+            
+            
+        <div style="background:#e9ecef; padding:15px; border-radius:5px; margin-bottom:20px;">
+            <strong>【累積予測評価・傾向】</strong><br>
+            ・解析データ件数: <strong>6 件</strong><br>
+            ・欠航判定の適合率（精度）: <strong>66.7%</strong><br>
+            <small style="color:#555;">※毎日の実績と気象モデル数言を照合し、自動計算されています。</small>
+        </div>
+        
+
+            <h2>フェリー週間欠航予測（便別）</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2" style="width: 15%;">日付</th>
+                        <th colspan="2" style="width: 42.5%;">第1便（午前便）</th>
+                        <th colspan="2" style="width: 42.5%;">第2便（午後便）</th>
+                    </tr>
+                    <tr>
+                        <th>気象データ</th>
+                        <th>予測判定</th>
+                        <th>気象データ</th>
+                        <th>予測判定</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+        <tr>
+            <td><strong>2026-09-05</strong></td>
+            <td>波高: 0.2m / 風速: 4.0m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+            <td>波高: 0.2m / 風速: 4.4m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>2026-09-06</strong></td>
+            <td>波高: 0.2m / 風速: 2.8m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+            <td>波高: 0.2m / 風速: 1.8m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>2026-09-07</strong></td>
+            <td>波高: 0.2m / 風速: 4.2m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+            <td>波高: 0.2m / 風速: 2.9m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>2026-09-08</strong></td>
+            <td>波高: 0.2m / 風速: 3.7m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+            <td>波高: 0.4m / 風速: 6.0m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>2026-09-09</strong></td>
+            <td>波高: 0.5m / 風速: 7.7m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+            <td>波高: 0.4m / 風速: 6.8m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>2026-09-10</strong></td>
+            <td>波高: 0.6m / 風速: 8.7m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+            <td>波高: 0.5m / 風速: 7.6m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>2026-09-11</strong></td>
+            <td>波高: 0.5m / 風速: 7.1m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+            <td>波高: 0.5m / 風速: 7.2m/s <br><small style="color:#666;">視界: 10.0km</small></td>
+            <td><span style="color:#155724; background-color:#d4edda; padding: 4px 8px; border-radius: 4px; font-weight:bold; display: inline-block;">通常運航</span></td>
+        </tr>
+        
+                </tbody>
+            </table>
+            
+            <h2>過去の運航実績・答え合わせ (直近10件)</h2>
+            <div class="past-records">
+                <table border="1" class="dataframe past-records">
+  <thead>
+    <tr style="text-align: center;">
+      <th>日付</th>
+      <th>システム予測</th>
+      <th>公式実績</th>
+      <th>最大風速(m/s)</th>
+      <th>最大波高(m)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2026-09-05</td>
+      <td>1便:通常運航 / 2便:通常運航</td>
+      <td>平常運航</td>
+      <td>4.40</td>
+      <td>0.23</td>
+    </tr>
+    <tr>
+      <td>2026-09-04</td>
+      <td>1便:通常運航 / 2便:通常運航</td>
+      <td>欠航</td>
+      <td>10.44</td>
+      <td>0.84</td>
+    </tr>
+    <tr>
+      <td>2026-09-03</td>
+      <td>1便:通常運航 / 2便:通常運航</td>
+      <td>平常運航</td>
+      <td>7.78</td>
+      <td>0.54</td>
+    </tr>
+    <tr>
+      <td>2026-09-02</td>
+      <td>1便:通常運航 / 2便:通常運航</td>
+      <td>平常運航</td>
+      <td>5.60</td>
+      <td>0.33</td>
+    </tr>
+    <tr>
+      <td>2026-09-01</td>
+      <td>1便:通常運航 / 2便:通常運航</td>
+      <td>平常運航</td>
+      <td>6.93</td>
+      <td>0.46</td>
+    </tr>
+    <tr>
+      <td>2026-08-31</td>
+      <td>1便:通常運航 / 2便:通常運航</td>
+      <td>欠航</td>
+      <td>4.88</td>
+      <td>0.27</td>
+    </tr>
+  </tbody>
+</table>
+            </div>
+        </div>
+    </body>
+    </html>
+    

@@ -1,0 +1,57 @@
+name: Daily Ferry Forecast Auto-Learner
+
+on:
+  schedule:
+    # 1回目: 朝7:00 JST (前日22:00 UTC) -> 1日の開始時に気象予測を先行生成
+    - cron: '0 22 * * *'
+    # 2回目: 朝9:15 JST (当日00:15 UTC) -> 公式発表の更新後に実績を自動取得・DB同期
+    - cron: '15 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Python環境のセットアップ
+        uses: actions/setup-python@v5.3.0
+        with:
+          python-version: '3.12'
+
+      - name: 依存ライブラリのインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 予測＆学習スクリプトの実行
+        run: python main.py
+
+      - name: 変更データを自動コミット＆プッシュ
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "変更はありません。"
+          else
+            git commit -m "Auto update forecast & learning data [skip ci]"
+            git push origin main
+          fi
+
+      - name: gh-pagesブランチへデプロイ
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          force_orphan: true
+          enable_jekyll: false
+          exclude_assets: ''
