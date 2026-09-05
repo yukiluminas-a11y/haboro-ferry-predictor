@@ -1,57 +1,52 @@
-name: Daily Ferry Forecast Auto-Learner
+name: Run Ferry Forecast & Scraping Workflow
 
 on:
   schedule:
-    # 1回目: 朝7:00 JST (前日22:00 UTC) -> 1日の開始時に気象予測を先行生成
-    - cron: '0 22 * * *'
-    # 2回目: 朝9:15 JST (当日00:15 UTC) -> 公式発表の更新後に実績を自動取得・DB同期
+    # 毎日 日本時間(JST) 朝9:15 に自動実行 (UTC 前日24:15 = 当日0:15)
     - cron: '15 0 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # GitHubの画面から「Run workflow」でいつでも手動実行可能
 
 jobs:
-  build-and-deploy:
+  forecast:
     runs-on: ubuntu-latest
+
     permissions:
-      contents: write
-      pages: write
-      id-token: write
+      contents: write # データベースやindex.htmlを書き込み（コミット）する権限
 
     steps:
-      - name: リポジトリのチェックアウト
-        uses: actions/checkout@v4.2.2
-        with:
-          fetch-depth: 0
+    # 1. リポジトリの最新コードを取得
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      - name: Python環境のセットアップ
-        uses: actions/setup-python@v5.3.0
-        with:
-          python-version: '3.12'
+    # 2. Python 3.10 環境をセットアップ
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
-      - name: 依存ライブラリのインストール
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+    # 3. 必要なライブラリ（scikit-learn, pandas等）を一括インストール
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-      - name: 予測＆学習スクリプトの実行
-        run: python main.py
+    # 4. メイン処理（AI学習・予測・公式実績取得）を実行
+    - name: Run main.py
+      run: python main.py
 
-      - name: 変更データを自動コミット＆プッシュ
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --staged --quiet; then
-            echo "変更はありません。"
-          else
-            git commit -m "Auto update forecast & learning data [skip ci]"
-            git push origin main
-          fi
-
-      - name: gh-pagesブランチへデプロイ
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          force_orphan: true
-          enable_jekyll: false
-          exclude_assets: ''
+    # 5. 更新されたDB（ferry_data.sqlite）とWeb画面（index.html）を自動コミット＆プッシュ
+    - name: Commit and Push Changes
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # 変更のあったファイルをインデックスに追加
+        git add index.html ferry_data.sqlite
+        
+        # 変更がある場合のみコミットしてプッシュ
+        if git diff --staged --quiet; then
+          echo "変更されたファイルがないため、コミットをスキップします。"
+        else
+          git commit -m "Auto-update: Ferry forecast & actual status ($(date +'%Y-%m-%d %H:%M JST'))"
+          git push
+        fi
