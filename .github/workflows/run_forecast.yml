@@ -2,19 +2,23 @@ name: Daily Ferry Forecast
 
 on:
   schedule:
-    # UTC 22:30 = JST 07:30 (日本時間 朝7:30に自動実行)
+    # UTC 22:30 = JST 07:30 (日本時間 朝7:30)
     - cron: '30 22 * * *'
-  workflow_dispatch: # GitHub画面からの手動実行ボタン
+  workflow_dispatch:
+
+# リポジトリへの書き込み権限を明示的に付与
+permissions:
+  contents: write
 
 jobs:
   run-forecast:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -32,5 +36,10 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add ferry_data.sqlite
-          git diff-index --quiet HEAD || git commit -m "Auto update ferry forecast [skip ci]"
-          git push
+          # 変更がある場合のみコミット・Pushを実行
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto update ferry forecast [skip ci]"
+            git push
+          else
+            echo "No changes to commit"
+          fi
