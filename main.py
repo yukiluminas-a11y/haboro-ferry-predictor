@@ -40,40 +40,50 @@ def init_db():
     conn.close()
 
 # ---------------------------------------------------------
-# 2. 公式サイトからの実績取得スクレイピング
+# 2. 公式サイトからの実績取得スクレイピング（安全化・フォールバック対応）
 # ---------------------------------------------------------
 def fetch_official_status():
     url = "https://haboro-enkai.com/"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         response.encoding = response.apparent_encoding
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 運航状況テキストの抽出（サイト構造に合わせて適宜調整）
-        text_content = soup.get_text()
+        text_content = soup.get_text() if soup else ""
         
+        # サイト上の記載内容の判定
         if "欠航" in text_content:
-            return "欠航", text_content
+            return "欠航", text_content[:300]
+        elif "平常" in text_content or "通常" in text_content or "運行" in text_content or "運航" in text_content:
+            return "平常運航", text_content[:300]
         else:
-            return "平常運航", text_content
+            # ページがまだ本日分に更新されていない場合
+            print("公式サイトの更新がまだ行われていません。実績データは保留（None）として処理します。")
+            return None, text_content[:300]
     except Exception as e:
-        print(f"公式サイト取得エラー: {e}")
-        return "不明", ""
+        print(f"公式サイト取得エラー（スキップして気象予測のみ実行します）: {e}")
+        return None, ""
 
 # ---------------------------------------------------------
-# 3. 気象データAPI（Open-Meteo等）からのデータ取得
+# 3. 気象データAPIからのデータ取得（8:00〜14:00に最適化）
 # ---------------------------------------------------------
 def fetch_weather_data():
-    # 本日の気象予測データおよび前日の波高データを取得するAPIリクエスト
     url = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=windspeed_10m,winddirection_10m,wave_height,visibility&timezone=Asia%2FTokyo"
     
     try:
-        res = requests.get(url, timeout=10).json()
+        res = requests.get(url, timeout=15).json()
         hourly = res.get('hourly', {})
+        if not hourly:
+            print("気象データ(hourly)の取得に失敗しました。")
+            return None
+
         df = pd.DataFrame(hourly)
         df['time'] = pd.to_datetime(df['time'])
         
-        # 【修正ポイント】1便体制（9:00発 / 13:00帰港）に合わせ、8:00〜14:00の範囲で集計
+        # 1便体制（9:00発 / 13:00帰港）に合わせ、航行時間帯を含む8:00〜14:00の範囲で集計
         today = pd.Timestamp.now(tz='Asia/Tokyo').date()
         df_today = df[df['time'].dt.date == today]
         df_sailing = df_today[(df_today['time'].dt.hour >= 8) & (df_today['time'].dt.hour <= 14)]
@@ -81,15 +91,15 @@ def fetch_weather_data():
         if df_sailing.empty:
             df_sailing = df_today
 
-        max_wind = df_sailing['windspeed_10m'].max()
-        max_wave = df_sailing['wave_height'].max()
-        min_vis = df_sailing['visibility'].min()
-        avg_wind_dir = df_sailing['winddirection_10m'].mean()
+        max_wind = float(df_sailing['windspeed_10m'].max())
+        max_wave = float(df_sailing['wave_height'].max())
+        min_vis = float(df_sailing['visibility'].min())
+        avg_wind_dir = float(df_sailing['winddirection_10m'].mean())
         
         # 前日データの波高取得（うねりの影響評価）
         yesterday = today - pd.Timedelta(days=1)
         df_yesterday = df[df['time'].dt.date == yesterday]
-        prev_max_wave = df_yesterday['wave_height'].max() if not df_yesterday.empty else 1.0
+        prev_max_wave = float(df_yesterday['wave_height'].max()) if not df_yesterday.empty else 1.0
 
         return {
             'max_wind_speed': max_wind,
@@ -99,7 +109,7 @@ def fetch_weather_data():
             'prev_day_max_wave': prev_max_wave
         }
     except Exception as e:
-        print(f"気象データ取得エラー: {e}")
+        print(f"気象データ取得例外発生: {e}")
         return None
 
 # ---------------------------------------------------------
@@ -171,6 +181,14 @@ def main():
     if weather_info is not None:
         predicted, mode = predict_status(weather_info, conn)
 
+        # 既存レコードの確認（すでに正しい実績が入っている場合は上書き防止）
+        cursor.execute("SELECT actual_status FROM ferry_records WHERE date = ?", (today_str,))
+        existing_row = cursor.fetchone()
+        
+        final_actual_status = official_status
+        if existing_row and existing_row[0] in ['平常運航', '欠航']:
+            final_actual_status = existing_row[0]
+
         # データベースへのUpsert処理
         cursor.execute('''
             INSERT INTO ferry_records (
@@ -180,7 +198,7 @@ def main():
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(date) DO UPDATE SET
                 predicted_status = excluded.predicted_status,
-                actual_status = excluded.actual_status,
+                actual_status = COALESCE(excluded.actual_status, ferry_records.actual_status),
                 max_wind_speed = excluded.max_wind_speed,
                 max_wave_height = excluded.max_wave_height,
                 min_visibility = excluded.min_visibility,
@@ -190,13 +208,13 @@ def main():
                 prev_day_max_wave = excluded.prev_day_max_wave,
                 prediction_mode = excluded.prediction_mode
         ''', (
-            today_str, predicted, official_status,
+            today_str, predicted, final_actual_status,
             weather_info['max_wind_speed'], weather_info['max_wave_height'],
             weather_info['min_visibility'], raw_text, now_timestamp,
             weather_info['wind_direction_deg'], weather_info['prev_day_max_wave'], mode
         ))
         conn.commit()
-        print(f"[{now_timestamp}] 判定更新完了: {today_str} | 予測={predicted} | モード={mode} | 公式={official_status}")
+        print(f"[{now_timestamp}] 処理完了: 日付={today_str} | 予測={predicted} | モード={mode} | 公式実績={final_actual_status}")
 
     conn.close()
 
