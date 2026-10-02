@@ -101,7 +101,6 @@ def fetch_weather_forecast_10days():
             min_vis = float(df_sailing['visibility'].min()) if not df_sailing.empty and pd.notna(df_sailing['visibility'].min()) else 10000.0
             avg_wind_dir = float(df_sailing['winddirection_10m'].mean()) if not df_sailing.empty and pd.notna(df_sailing['winddirection_10m'].mean()) else 0.0
 
-            # 前日の最大波高を取得
             if idx > 0:
                 prev_date_str = unique_dates[idx - 1]
                 df_prev = df[df['date_str'] == prev_date_str]
@@ -197,17 +196,14 @@ def predict_status_for_day(weather_info, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 6. index.html 自動生成処理（10日分予報＋実績履歴）
+# 6. index.html 自動生成処理
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
         today_str = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d')
         now_str = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d %H:%M:%S')
 
-        # 10日分の予報（本日以降）
         df_forecast = pd.read_sql_query("SELECT * FROM ferry_records WHERE date >= ? ORDER BY date ASC LIMIT 10", conn, params=(today_str,))
-        
-        # 過去実績・履歴（本日以前）
         df_history = pd.read_sql_query("SELECT * FROM ferry_records WHERE date <= ? ORDER BY date DESC LIMIT 30", conn, params=(today_str,))
 
         def build_table_rows(df_data):
@@ -219,4 +215,9 @@ def generate_html(conn):
                 
                 color = "#e74c3c" if pred == "欠航予想" else ("#f39c12" if pred == "注意予想" else "#2ecc71")
                 
-                row = '
+                d = str(r['date'])
+                w = str(r['max_wind_speed'])
+                h = str(r['max_wave_height'])
+                u = str(r['updated_at'])
+                
+                row = f'
