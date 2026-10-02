@@ -10,7 +10,6 @@ from sklearn.ensemble import RandomForestClassifier
 # 設定値
 # ---------------------------------------------------------
 DB_FILE = 'ferry_data.sqlite'
-# 羽幌沖（羽幌〜焼尻・天売）の座標
 LATITUDE = 44.3600
 LONGITUDE = 141.6900
 
@@ -40,7 +39,7 @@ def init_db():
     conn.close()
 
 # ---------------------------------------------------------
-# 2. 公式サイトからの実績取得スクレイピング（安全化・フォールバック対応）
+# 2. 公式サイトからの実績取得（新ダイヤ対応スクレイピング）
 # ---------------------------------------------------------
 def fetch_official_status():
     url = "https://haboro-enkai.com/"
@@ -54,21 +53,24 @@ def fetch_official_status():
         
         text_content = soup.get_text() if soup else ""
         
-        # サイト上の記載内容の判定
-        if "欠航" in text_content:
+        # 本日日付（例: 10月1日、10月2日）がテキストに含まれているか確認
+        today_jst = pd.Timestamp.now(tz='Asia/Tokyo')
+        month_day_str = f"{today_jst.month}月{today_jst.day}日"
+        
+        if "全便欠航" in text_content or "欠航" in text_content:
+            # 「欠航」キーワードが含まれており、かつ本日の案内と思われる場合
             return "欠航", text_content[:300]
-        elif "平常" in text_content or "通常" in text_content or "運行" in text_content or "運航" in text_content:
+        elif "平常運航" in text_content or "通常運航" in text_content or "運航いたします" in text_content:
             return "平常運航", text_content[:300]
         else:
-            # ページがまだ本日分に更新されていない場合
-            print("公式サイトの更新がまだ行われていません。実績データは保留（None）として処理します。")
+            print(f"公式サイトの本日分（{month_day_str}）更新が未確認のため、実績取得を保留します。")
             return None, text_content[:300]
     except Exception as e:
-        print(f"公式サイト取得エラー（スキップして気象予測のみ実行します）: {e}")
+        print(f"公式サイト取得例外（気象予測のみ先行処理します）: {e}")
         return None, ""
 
 # ---------------------------------------------------------
-# 3. 気象データAPIからのデータ取得（8:00〜14:00に最適化）
+# 3. 気象データAPIからのデータ取得（1便体制：8:00〜14:00）
 # ---------------------------------------------------------
 def fetch_weather_data():
     url = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=windspeed_10m,winddirection_10m,wave_height,visibility&timezone=Asia%2FTokyo"
@@ -77,15 +79,14 @@ def fetch_weather_data():
         res = requests.get(url, timeout=15).json()
         hourly = res.get('hourly', {})
         if not hourly:
-            print("気象データ(hourly)の取得に失敗しました。")
             return None
 
         df = pd.DataFrame(hourly)
         df['time'] = pd.to_datetime(df['time'])
         
-        # 1便体制（9:00発 / 13:00帰港）に合わせ、航行時間帯を含む8:00〜14:00の範囲で集計
         today = pd.Timestamp.now(tz='Asia/Tokyo').date()
         df_today = df[df['time'].dt.date == today]
+        # 9:00発/13:00着の1便体制に対応した時間帯絞り込み
         df_sailing = df_today[(df_today['time'].dt.hour >= 8) & (df_today['time'].dt.hour <= 14)]
         
         if df_sailing.empty:
@@ -96,7 +97,6 @@ def fetch_weather_data():
         min_vis = float(df_sailing['visibility'].min())
         avg_wind_dir = float(df_sailing['winddirection_10m'].mean())
         
-        # 前日データの波高取得（うねりの影響評価）
         yesterday = today - pd.Timedelta(days=1)
         df_yesterday = df[df['time'].dt.date == yesterday]
         prev_max_wave = float(df_yesterday['wave_height'].max()) if not df_yesterday.empty else 1.0
@@ -109,18 +109,17 @@ def fetch_weather_data():
             'prev_day_max_wave': prev_max_wave
         }
     except Exception as e:
-        print(f"気象データ取得例外発生: {e}")
+        print(f"気象データ取得エラー: {e}")
         return None
 
 # ---------------------------------------------------------
-# 4. 機械学習（ランダムフォレスト）による判定モデル
+# 4. 機械学習（AI）による判定モデル
 # ---------------------------------------------------------
 def predict_status(weather_info, conn):
     cursor = conn.cursor()
     cursor.execute("SELECT max_wind_speed, max_wave_height, wind_direction_deg, prev_day_max_wave, actual_status FROM ferry_records WHERE actual_status IN ('平常運航', '欠航')")
     rows = cursor.fetchall()
     
-    # 有効実績データが20件未満の場合は固定ルール判定
     if len(rows) < 20:
         if weather_info['max_wave_height'] >= 2.5 or weather_info['max_wind_speed'] >= 14.0:
             return "欠航予想", "固定ルール"
@@ -129,21 +128,17 @@ def predict_status(weather_info, conn):
         else:
             return "平常予想", "固定ルール"
 
-    # --- 機械学習（AI）モード ---
-    X = []
-    y = []
+    X, y = [], []
     for r in rows:
         wind_deg = r[2] if r[2] is not None else 0.0
         rad = math.radians(wind_deg)
         prev_wave = r[3] if r[3] is not None else 1.0
-        # 特徴量: 風速, 波高, 風向(cos), 風向(sin), 前日波高
         X.append([r[0], r[1], math.cos(rad), math.sin(rad), prev_wave])
         y.append(1 if r[4] == "欠航" else 0)
 
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
     clf.fit(X, y)
 
-    # 当日データの変換
     cur_rad = math.radians(weather_info['wind_direction_deg'])
     cur_X = [[
         weather_info['max_wind_speed'],
@@ -153,7 +148,6 @@ def predict_status(weather_info, conn):
         weather_info['prev_day_max_wave']
     ]]
 
-    # 欠航確率（クラス1の確率）を算出
     cancel_prob = clf.predict_proba(cur_X)[0][1]
 
     if cancel_prob >= 0.65:
@@ -174,14 +168,13 @@ def main():
     today_str = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d')
     now_timestamp = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d %H:%M:%S')
 
-    # 気象データおよび実績の取得
     weather_info = fetch_weather_data()
     official_status, raw_text = fetch_official_status()
 
     if weather_info is not None:
         predicted, mode = predict_status(weather_info, conn)
 
-        # 既存レコードの確認（すでに正しい実績が入っている場合は上書き防止）
+        # すでに確定実績が入っている場合は上書き防止
         cursor.execute("SELECT actual_status FROM ferry_records WHERE date = ?", (today_str,))
         existing_row = cursor.fetchone()
         
@@ -189,7 +182,6 @@ def main():
         if existing_row and existing_row[0] in ['平常運航', '欠航']:
             final_actual_status = existing_row[0]
 
-        # データベースへのUpsert処理
         cursor.execute('''
             INSERT INTO ferry_records (
                 date, predicted_status, actual_status, max_wind_speed, max_wave_height,
@@ -214,7 +206,7 @@ def main():
             weather_info['wind_direction_deg'], weather_info['prev_day_max_wave'], mode
         ))
         conn.commit()
-        print(f"[{now_timestamp}] 処理完了: 日付={today_str} | 予測={predicted} | モード={mode} | 公式実績={final_actual_status}")
+        print(f"[{now_timestamp}] 更新完了: 日付={today_str} | 予測={predicted} | モード={mode} | 公式実績={final_actual_status}")
 
     conn.close()
 
