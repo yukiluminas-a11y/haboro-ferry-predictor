@@ -196,7 +196,7 @@ def predict_status_for_day(weather_info, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 6. index.html 自動生成処理 (文字列組み立てを完全分離)
+# 6. index.html 自動生成処理 (文字列リテラル改行エラーの完全撲滅構造)
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
@@ -207,7 +207,7 @@ def generate_html(conn):
         df_history = pd.read_sql_query("SELECT * FROM ferry_records WHERE date <= ? ORDER BY date DESC LIMIT 30", conn, params=(today_str,))
 
         def build_table_rows(df_data):
-            rows_list = []
+            lines = []
             for _, r in df_data.iterrows():
                 pred = str(r['predicted_status']) if pd.notna(r['predicted_status']) else "-"
                 actual = str(r['actual_status']) if pd.notna(r['actual_status']) and r['actual_status'] else "確認中"
@@ -220,4 +220,6 @@ def generate_html(conn):
                 h = str(r['max_wave_height'])
                 u = str(r['updated_at'])
                 
-                row_template = '
+                # 単一引用符の改行トラブルを防ぐため各要素を配列で結合
+                row_cells = [
+                    "
