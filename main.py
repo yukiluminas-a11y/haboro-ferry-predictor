@@ -116,7 +116,6 @@ def fetch_weather_data():
 # 4. 自己学習（モデルの再学習・保存）エンジン
 # ---------------------------------------------------------
 def train_and_update_model(conn):
-    """DBに蓄積された確定データ（平常運航 / 欠航）からモデルを学習・更新する"""
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -130,7 +129,6 @@ def train_and_update_model(conn):
 
         statuses = set(r[4] for r in rows) if rows else set()
         
-        # 学習に必要な最小条件：20件以上のデータかつ両判定（平常・欠航）が存在すること
         if len(rows) < 20 or len(statuses) < 2:
             print(f"[INFO] 再学習スキップ: データ件数不足 (確定データ数: {len(rows)}件)")
             return None
@@ -141,14 +139,12 @@ def train_and_update_model(conn):
             rad = math.radians(wind_deg)
             prev_wave = r[3] if r[3] is not None else 1.0
             
-            # 特徴量: [最大風速, 最大波高, 風向Cos, 風向Sin, 前日波高]
             X.append([r[0], r[1], math.cos(rad), math.sin(rad), prev_wave])
             y.append(1 if r[4] == "欠航" else 0)
 
         clf = RandomForestClassifier(n_estimators=100, random_state=42)
         clf.fit(X, y)
 
-        # モデルを保存
         joblib.dump(clf, MODEL_FILE)
         print(f"[INFO] 自己学習完了: {len(rows)}件のデータでモデル更新・保存 ({MODEL_FILE})")
         return clf
@@ -169,10 +165,8 @@ def predict_status(weather_info, conn):
             return "平常予想", "固定ルール"
 
     try:
-        # 1. 最新の蓄積データから再学習を試みる
         clf = train_and_update_model(conn)
 
-        # 2. 再学習がスキップされた場合、既存の保存済みモデル読み込みを試みる
         if clf is None and os.path.exists(MODEL_FILE):
             try:
                 clf = joblib.load(MODEL_FILE)
@@ -181,11 +175,9 @@ def predict_status(weather_info, conn):
                 print(f"[WARN] 保存済みモデル読み込み失敗: {e}")
                 clf = None
 
-        # 3. モデルが準備できていない場合は固定ルールにフォールバック
         if clf is None:
             return fallback_rule()
 
-        # 4. モデルによる予測確率の計算
         cur_rad = math.radians(weather_info['wind_direction_deg'])
         cur_X = [[
             weather_info['max_wind_speed'],
@@ -208,14 +200,14 @@ def predict_status(weather_info, conn):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 6. index.html 自動生成処理
+# 6. index.html 自動生成処理（SyntaxError修正箇所）
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
         df = pd.read_sql_query("SELECT * FROM ferry_records ORDER BY date DESC LIMIT 30", conn)
         now_str = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d %H:%M:%S')
 
-        rows_html = ""
+        rows_list = []
         for _, r in df.iterrows():
             pred = r['predicted_status'] if pd.notna(r['predicted_status']) else "-"
             actual = r['actual_status'] if pd.notna(r['actual_status']) and r['actual_status'] else "確認中"
@@ -223,4 +215,4 @@ def generate_html(conn):
             
             color = "#e74c3c" if pred == "欠航予想" else ("#f39c12" if pred == "注意予想" else "#2ecc71")
             
-            rows_html += f"""
+            row = "
