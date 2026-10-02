@@ -36,16 +36,47 @@ def init_db():
                 updated_at TEXT,
                 wind_direction_deg REAL,
                 prev_day_max_wave REAL,
-                prediction_mode TEXT
+                prediction_mode TEXT,
+                consecutive_cancels INTEGER DEFAULT 0
             )
         ''')
+        # 既存DBへのカラム追加互換処理
+        try:
+            cursor.execute("ALTER TABLE ferry_records ADD COLUMN consecutive_cancels INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"[ERROR] DB初期化失敗: {e}")
 
 # ---------------------------------------------------------
-# 2. 公式サイトからの実績取得
+# 2. 直前連続欠航日数の計算ロジック
+# ---------------------------------------------------------
+def get_consecutive_cancels(conn, target_date_str):
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT actual_status FROM ferry_records 
+            WHERE date < ? AND actual_status IS NOT NULL 
+            ORDER BY date DESC LIMIT 5
+        """, (target_date_str,))
+        rows = cursor.fetchall()
+        
+        count = 0
+        for r in rows:
+            if r[0] == '欠航':
+                count += 1
+            else:
+                break
+        return count
+    except Exception as e:
+        print(f"[WARN] 連続欠航日数計算エラー: {e}")
+        return 0
+
+# ---------------------------------------------------------
+# 3. 公式サイトからの実績取得
 # ---------------------------------------------------------
 def fetch_official_status():
     url = "https://haboro-enkai.com/"
@@ -69,23 +100,30 @@ def fetch_official_status():
         return None, ""
 
 # ---------------------------------------------------------
-# 3. 気象データAPI（向こう10日分）の取得
+# 4. 気象データAPI（一般気象＋海上気象マージ取得）
 # ---------------------------------------------------------
 def fetch_weather_forecast_10days():
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=windspeed_10m,winddirection_10m,wave_height,visibility&forecast_days=10&timezone=Asia%2FTokyo"
+    weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=windspeed_10m,winddirection_10m,visibility&forecast_days=10&timezone=Asia%2FTokyo"
+    marine_url = f"https://marine-api.open-meteo.com/v1/marine?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=wave_height&forecast_days=10&timezone=Asia%2FTokyo"
+
     try:
-        res = requests.get(url, timeout=15)
-        res.raise_for_status()
-        data = res.json()
-        hourly = data.get('hourly', {})
-        if not hourly or 'time' not in hourly:
-            print("[WARN] 気象データの hourly パラメータが空です")
-            return []
+        res_w = requests.get(weather_url, timeout=15)
+        res_w.raise_for_status()
+        df_w = pd.DataFrame(res_w.json().get('hourly', {}))
+        df_w['time'] = pd.to_datetime(df_w['time'])
 
-        df = pd.DataFrame(hourly)
-        df['time'] = pd.to_datetime(df['time'])
+        try:
+            res_m = requests.get(marine_url, timeout=15)
+            res_m.raise_for_status()
+            df_m = pd.DataFrame(res_m.json().get('hourly', {}))
+            df_m['time'] = pd.to_datetime(df_m['time'])
+            df = pd.merge(df_w, df_m[['time', 'wave_height']], on='time', how='left')
+        except Exception as e_m:
+            print(f"[WARN] 海上気象API取得失敗のため風速より波高補完: {e_m}")
+            df = df_w
+            df['wave_height'] = None
+
         df['date_str'] = df['time'].dt.strftime('%Y-%m-%d')
-
         daily_forecasts = []
         unique_dates = df['date_str'].unique()
 
@@ -96,14 +134,21 @@ def fetch_weather_forecast_10days():
                 df_sailing = df_day
 
             max_wind = float(df_sailing['windspeed_10m'].max()) if not df_sailing.empty and pd.notna(df_sailing['windspeed_10m'].max()) else 0.0
-            max_wave = float(df_sailing['wave_height'].max()) if not df_sailing.empty and pd.notna(df_sailing['wave_height'].max()) else 0.0
-            min_vis = float(df_sailing['visibility'].min()) if not df_sailing.empty and pd.notna(df_sailing['visibility'].min()) else 10000.0
+            raw_wave = df_sailing['wave_height'].max() if 'wave_height' in df_sailing.columns else None
+            
+            if pd.notna(raw_wave) and raw_wave is not None:
+                max_wave = float(raw_wave)
+            else:
+                max_wave = round(max_wind * 0.12, 2)
+
+            min_vis = float(df_sailing['visibility'].min()) if 'visibility' in df_sailing.columns and not df_sailing.empty and pd.notna(df_sailing['visibility'].min()) else 10000.0
             avg_wind_dir = float(df_sailing['winddirection_10m'].mean()) if not df_sailing.empty and pd.notna(df_sailing['winddirection_10m'].mean()) else 0.0
 
             if idx > 0:
                 prev_date_str = unique_dates[idx - 1]
                 df_prev = df[df['date_str'] == prev_date_str]
-                prev_max_wave = float(df_prev['wave_height'].max()) if not df_prev.empty and pd.notna(df_prev['wave_height'].max()) else 1.0
+                prev_wave_val = df_prev['wave_height'].max() if 'wave_height' in df_prev.columns else None
+                prev_max_wave = float(prev_wave_val) if pd.notna(prev_wave_val) and prev_wave_val is not None else 1.0
             else:
                 prev_max_wave = 1.0
 
@@ -122,13 +167,13 @@ def fetch_weather_forecast_10days():
         return []
 
 # ---------------------------------------------------------
-# 4. 自己学習（モデルの再学習・保存）エンジン
+# 5. 自己学習（モデルの再学習・保存）エンジン
 # ---------------------------------------------------------
 def train_and_update_model(conn):
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT max_wind_speed, max_wave_height, wind_direction_deg, prev_day_max_wave, actual_status 
+            SELECT max_wind_speed, max_wave_height, wind_direction_deg, prev_day_max_wave, consecutive_cancels, actual_status 
             FROM ferry_records 
             WHERE actual_status IN ('平常運航', '欠航') 
               AND max_wind_speed IS NOT NULL 
@@ -136,7 +181,7 @@ def train_and_update_model(conn):
         """)
         rows = cursor.fetchall()
 
-        statuses = set(r[4] for r in rows) if rows else set()
+        statuses = set(r[5] for r in rows) if rows else set()
         
         if len(rows) < 20 or len(statuses) < 2:
             return None
@@ -146,24 +191,32 @@ def train_and_update_model(conn):
             wind_deg = r[2] if r[2] is not None else 0.0
             rad = math.radians(wind_deg)
             prev_wave = r[3] if r[3] is not None else 1.0
-            X.append([r[0], r[1], math.cos(rad), math.sin(rad), prev_wave])
-            y.append(1 if r[4] == "欠航" else 0)
+            cancels = r[4] if r[4] is not None else 0
+            
+            # 特徴量: [最大風速, 最大波高, cos(風向), sin(風向), 前日波高, 連続欠航日数]
+            X.append([r[0], r[1], math.cos(rad), math.sin(rad), prev_wave, cancels])
+            y.append(1 if r[5] == "欠航" else 0)
 
         clf = RandomForestClassifier(n_estimators=100, random_state=42)
         clf.fit(X, y)
 
         joblib.dump(clf, MODEL_FILE)
+        print(f"[INFO] 自己学習完了: {len(rows)}件のデータ（連続欠航指標含む）でモデル更新・保存")
         return clf
     except Exception as e:
         print(f"[ERROR] 自己学習処理エラー: {e}")
         return None
 
 # ---------------------------------------------------------
-# 5. 判定推論関数
+# 6. 判定推論関数（連続欠航による出港圧力補正入り）
 # ---------------------------------------------------------
-def predict_status_for_day(weather_info, clf):
+def predict_status_for_day(weather_info, cancels, clf):
     def fallback_rule():
-        if weather_info['max_wave_height'] >= 2.5 or weather_info['max_wind_speed'] >= 14.0:
+        # 連続欠航が2日以上ある場合は運航圧力（閾値の緩和）を考慮
+        wave_limit = 2.8 if cancels >= 2 else 2.5
+        wind_limit = 15.0 if cancels >= 2 else 14.0
+        
+        if weather_info['max_wave_height'] >= wave_limit or weather_info['max_wind_speed'] >= wind_limit:
             return "欠航予想", "固定ルール"
         elif weather_info['max_wave_height'] >= 1.8 or weather_info['max_wind_speed'] >= 10.0:
             return "注意予想", "固定ルール"
@@ -180,7 +233,8 @@ def predict_status_for_day(weather_info, clf):
             weather_info['max_wave_height'],
             math.cos(cur_rad),
             math.sin(cur_rad),
-            weather_info['prev_day_max_wave']
+            weather_info['prev_day_max_wave'],
+            cancels
         ]]
 
         cancel_prob = clf.predict_proba(cur_X)[0][1]
@@ -195,7 +249,7 @@ def predict_status_for_day(weather_info, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 6. index.html 自動生成処理 (完全構文安全設計)
+# 7. index.html 自動生成処理
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
