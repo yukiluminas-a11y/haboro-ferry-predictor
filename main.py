@@ -200,7 +200,7 @@ def predict_status(weather_info, conn):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 6. index.html 自動生成処理（SyntaxError修正箇所）
+# 6. index.html 自動生成処理（安全なフォーマット記述に修正）
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
@@ -215,4 +215,110 @@ def generate_html(conn):
             
             color = "#e74c3c" if pred == "欠航予想" else ("#f39c12" if pred == "注意予想" else "#2ecc71")
             
-            row = "
+            row = '<tr><td>{}</td><td style="color: {}; font-weight: bold;">{}</td><td>{}</td><td>{} m/s</td><td>{} m</td><td>{}</td><td>{}</td></tr>'.format(
+                r['date'], color, pred, actual, r['max_wind_speed'], r['max_wave_height'], mode, r['updated_at']
+            )
+            rows_list.append(row)
+
+        rows_html = "\n".join(rows_list)
+
+        html_template = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>羽幌沿海フェリー 運航予測</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f4f6f8; color: #333; }
+        h1 { font-size: 1.5rem; }
+        .meta { font-size: 0.85rem; color: #666; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden; }
+        th, td { padding: 10px 12px; text-align: center; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        th { background: #2c3e50; color: #fff; font-weight: normal; }
+        tr:hover { background: #f8f9fa; }
+    </style>
+</head>
+<body>
+    <h1>羽幌沿海フェリー 運航予測・実績</h1>
+    <div class="meta">最終更新時刻: """ + str(now_str) + """ (JST)</div>
+    <table>
+        <thead>
+            <tr>
+                <th>日付</th>
+                <th>AI予測</th>
+                <th>公式実績</th>
+                <th>最大風速</th>
+                <th>最大波高</th>
+                <th>判定モード</th>
+                <th>更新時刻</th>
+            </tr>
+        </thead>
+        <tbody>
+""" + rows_html + """
+        </tbody>
+    </table>
+</body>
+</html>
+"""
+
+        with open(HTML_FILE, 'w', encoding='utf-8') as f:
+            f.write(html_template)
+        print("index.html の生成が正常完了しました。")
+    except Exception as e:
+        print(f"[ERROR] HTML生成失敗: {e}")
+
+# ---------------------------------------------------------
+# 7. メイン実行処理
+# ---------------------------------------------------------
+def main():
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    
+    today_str = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d')
+    now_timestamp = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d %H:%M:%S')
+
+    weather_info = fetch_weather_data()
+    official_status, raw_text = fetch_official_status()
+
+    if weather_info is not None:
+        predicted, mode = predict_status(weather_info, conn)
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT actual_status FROM ferry_records WHERE date = ?", (today_str,))
+        existing_row = cursor.fetchone()
+        
+        final_actual_status = official_status
+        if existing_row and existing_row[0] in ['平常運航', '欠航']:
+            final_actual_status = existing_row[0]
+
+        cursor.execute('''
+            INSERT INTO ferry_records (
+                date, predicted_status, actual_status, max_wind_speed, max_wave_height,
+                min_visibility, raw_official_text, updated_at, wind_direction_deg,
+                prev_day_max_wave, prediction_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date) DO UPDATE SET
+                predicted_status = excluded.predicted_status,
+                actual_status = COALESCE(excluded.actual_status, ferry_records.actual_status),
+                max_wind_speed = excluded.max_wind_speed,
+                max_wave_height = excluded.max_wave_height,
+                min_visibility = excluded.min_visibility,
+                raw_official_text = excluded.raw_official_text,
+                updated_at = excluded.updated_at,
+                wind_direction_deg = excluded.wind_direction_deg,
+                prev_day_max_wave = excluded.prev_day_max_wave,
+                prediction_mode = excluded.prediction_mode
+        ''', (
+            today_str, predicted, final_actual_status,
+            weather_info['max_wind_speed'], weather_info['max_wave_height'],
+            weather_info['min_visibility'], raw_text, now_timestamp,
+            weather_info['wind_direction_deg'], weather_info['prev_day_max_wave'], mode
+        ))
+        conn.commit()
+        print(f"[{now_timestamp}] DB更新完了: 日付={today_str} | 予測={predicted} | モード={mode}")
+
+    generate_html(conn)
+    conn.close()
+
+if __name__ == '__main__':
+    main()
