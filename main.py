@@ -193,7 +193,6 @@ def train_and_update_model(conn):
             prev_wave = r[3] if r[3] is not None else 1.0
             cancels = r[4] if r[4] is not None else 0
             
-            # 特徴量: [最大風速, 最大波高, cos(風向), sin(風向), 前日波高, 連続欠航日数]
             X.append([r[0], r[1], math.cos(rad), math.sin(rad), prev_wave, cancels])
             y.append(1 if r[5] == "欠航" else 0)
 
@@ -212,7 +211,6 @@ def train_and_update_model(conn):
 # ---------------------------------------------------------
 def predict_status_for_day(weather_info, cancels, clf):
     def fallback_rule():
-        # 連続欠航が2日以上ある場合は運航圧力（閾値の緩和）を考慮
         wave_limit = 2.8 if cancels >= 2 else 2.5
         wind_limit = 15.0 if cancels >= 2 else 14.0
         
@@ -249,7 +247,7 @@ def predict_status_for_day(weather_info, cancels, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 7. index.html 自動生成処理
+# 7. index.html 自動生成処理 (f-string不使用・format構文で安全化)
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
@@ -278,4 +276,4 @@ def generate_html(conn):
                 h = str(r['max_wave_height']) + " m"
                 u = str(r['updated_at'])
                 
-                td_pred = f'
+                line = '
