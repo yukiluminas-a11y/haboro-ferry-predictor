@@ -1,191 +1,167 @@
 import os
 import sqlite3
-import datetime
+import math
 import requests
-from bs4 import BeautifulSoup
 import pandas as pd
-import numpy as np
+from bs4 import BeautifulSoup
 from sklearn.ensemble import RandomForestClassifier
 
-# --- 設定値 ---
-DB_PATH = "ferry_data.sqlite"
-HTML_PATH = "index.html"
-MIN_ML_SAMPLES = 20  # AI判定に移行するために必要な最低実績件数
+# ---------------------------------------------------------
+# 設定値
+# ---------------------------------------------------------
+DB_FILE = 'ferry_data.sqlite'
+HTML_FILE = 'index.html'
+LATITUDE = 44.3600
+LONGITUDE = 141.6900
 
-# Open-Meteo API (羽幌付近の緯度・経度)
-LATITUDE = 44.36
-LONGITUDE = 141.70
-
-# --- 1. 向こう1週間分の気象データを取得 (Open-Meteo API) ---
-def fetch_weekly_weather_forecast():
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=windspeed_10m,winddirection_10m&daily=windspeed_10m_max,winddirection_10m_dominant&timezone=Asia%2FTokyo"
-    marine_url = f"https://marine-api.open-meteo.com/v1/marine?latitude={LATITUDE}&longitude={LONGITUDE}&daily=wave_height_max&timezone=Asia%2FTokyo"
-    
-    try:
-        res_w = requests.get(url, timeout=10).json()
-        res_m = requests.get(marine_url, timeout=10).json()
-        
-        forecast_list = []
-        days_cnt = len(res_w['daily']['time'])
-        
-        for i in range(days_cnt):
-            forecast_list.append({
-                "date": res_w['daily']['time'][i],
-                "max_wind_speed": float(res_w['daily']['windspeed_10m_max'][i]),
-                "wind_direction_deg": float(res_w['daily']['winddirection_10m_dominant'][i]),
-                "max_wave_height": float(res_m['daily']['wave_height_max'][i])
-            })
-        return forecast_list
-    except Exception as e:
-        print(f"気象データ取得エラー: {e}")
-        return []
-
-# --- 2. 公式実績の取得 (スクレイピング) ---
-def fetch_official_status():
-    url = "https://www.haboro-enkai.com/"
-    try:
-        res = requests.get(url, timeout=10)
-        res.encoding = res.apparent_encoding
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
-        main_content = soup.find("main") or soup.find("div", id="content") or soup.find("body") or soup
-        cleaned_text = main_content.get_text().replace(" ", "").replace("\n", "").replace("\r", "")
-        
-        if any(k in cleaned_text for k in ["平常運航", "通常運航", "全便運航", "欠航はありません", "全便通常"]):
-            return "平常運航"
-        elif "全便欠航" in cleaned_text or "終日欠航" in cleaned_text or "欠航" in cleaned_text:
-            return "欠航"
-        elif "条件付" in cleaned_text:
-            return "条件付運航"
-        elif "見合わせ" in cleaned_text:
-            return "見合わせ"
-        else:
-            return "平常運航"
-    except Exception as e:
-        print(f"公式実績取得エラー: {e}")
-        return "未取得"
-
-# --- 3. データベース操作（安全なマイグレーション対応版） ---
+# ---------------------------------------------------------
+# 1. データベースの初期化
+# ---------------------------------------------------------
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS ferry_records (
-        date TEXT PRIMARY KEY,
-        max_wind_speed REAL,
-        max_wave_height REAL,
-        wind_direction_deg REAL,
-        prev_day_max_wave REAL,
-        predicted_status TEXT,
-        actual_status TEXT,
-        prediction_mode TEXT
-    )
-    """)
-    
-    cursor.execute("PRAGMA table_info(ferry_records)")
-    columns = [column[1] for column in cursor.fetchall()]
-    
-    fields_to_add = {
-        "max_wind_speed": "REAL",
-        "max_wave_height": "REAL",
-        "wind_direction_deg": "REAL",
-        "prev_day_max_wave": "REAL",
-        "predicted_status": "TEXT",
-        "actual_status": "TEXT",
-        "prediction_mode": "TEXT"
-    }
-    
-    for field, col_type in fields_to_add.items():
-        if field not in columns:
-            cursor.execute(f"ALTER TABLE ferry_records ADD COLUMN {field} {col_type}")
-            
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ferry_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT UNIQUE,
+            predicted_status TEXT,
+            actual_status TEXT,
+            max_wind_speed REAL,
+            max_wave_height REAL,
+            min_visibility REAL,
+            raw_official_text TEXT,
+            updated_at TEXT,
+            wind_direction_deg REAL,
+            prev_day_max_wave REAL,
+            prediction_mode TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
 
-def get_prev_day_wave(target_date):
-    """指定日の前日の最大波高を取得"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT max_wave_height FROM ferry_records WHERE date < ? ORDER BY date DESC LIMIT 1", (target_date,))
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] if row else None
+# ---------------------------------------------------------
+# 2. 公式サイトからの実績取得（新ダイヤ対応）
+# ---------------------------------------------------------
+def fetch_official_status():
+    url = "https://haboro-enkai.com/"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.encoding = response.apparent_encoding
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text_content = soup.get_text() if soup else ""
+        
+        if "欠航" in text_content:
+            return "欠航", text_content[:300]
+        elif "平常" in text_content or "通常" in text_content or "運航" in text_content:
+            return "平常運航", text_content[:300]
+        else:
+            return None, text_content[:300]
+    except Exception as e:
+        print(f"公式サイト取得スキップ: {e}")
+        return None, ""
 
-# --- 4. 予測ロジック（固定ルール vs AI学習） ---
-def predict_with_rules(weather):
-    wind = weather['max_wind_speed']
-    wave = weather['max_wave_height']
-    
-    if wind >= 14.0 or wave >= 2.5:
-        return "欠航予想", 85.0
-    elif wind >= 10.0 or wave >= 1.8:
-        return "注意予想", 50.0
-    else:
-        return "平常予想", 10.0
+# ---------------------------------------------------------
+# 3. 気象データAPIからのデータ取得（1便体制：8:00〜14:00）
+# ---------------------------------------------------------
+def fetch_weather_data():
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUDE}&longitude={LONGITUDE}&hourly=windspeed_10m,winddirection_10m,wave_height,visibility&timezone=Asia%2FTokyo"
+    try:
+        res = requests.get(url, timeout=15).json()
+        hourly = res.get('hourly', {})
+        if not hourly:
+            return None
 
-def train_ml_model():
-    """蓄積データからモデルを学習させて返す"""
-    conn = sqlite3.connect(DB_PATH)
-    query = """
-    SELECT max_wind_speed, max_wave_height, wind_direction_deg, prev_day_max_wave, actual_status 
-    FROM ferry_records 
-    WHERE actual_status IS NOT NULL AND actual_status IN ('平常運航', '欠航')
-    """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+        df = pd.DataFrame(hourly)
+        df['time'] = pd.to_datetime(df['time'])
+        
+        today = pd.Timestamp.now(tz='Asia/Tokyo').date()
+        df_today = df[df['time'].dt.date == today]
+        df_sailing = df_today[(df_today['time'].dt.hour >= 8) & (df_today['time'].dt.hour <= 14)]
+        
+        if df_sailing.empty:
+            df_sailing = df_today
 
-    if len(df) < MIN_ML_SAMPLES:
+        max_wind = float(df_sailing['windspeed_10m'].max())
+        max_wave = float(df_sailing['wave_height'].max())
+        min_vis = float(df_sailing['visibility'].min())
+        avg_wind_dir = float(df_sailing['winddirection_10m'].mean())
+        
+        yesterday = today - pd.Timedelta(days=1)
+        df_yesterday = df[df['time'].dt.date == yesterday]
+        prev_max_wave = float(df_yesterday['wave_height'].max()) if not df_yesterday.empty else 1.0
+
+        return {
+            'max_wind_speed': max_wind,
+            'max_wave_height': max_wave,
+            'min_visibility': min_vis,
+            'wind_direction_deg': avg_wind_dir,
+            'prev_day_max_wave': prev_max_wave
+        }
+    except Exception as e:
+        print(f"気象データ取得エラー: {e}")
         return None
 
-    df['target'] = df['actual_status'].apply(lambda x: 1 if '欠航' in str(x) else 0)
-    df['wind_direction_deg'] = df['wind_direction_deg'].fillna(0.0)
-    df['wind_dir_cos'] = np.cos(np.radians(df['wind_direction_deg']))
-    df['wind_dir_sin'] = np.sin(np.radians(df['wind_direction_deg']))
-    df['prev_day_max_wave'] = df['prev_day_max_wave'].fillna(df['max_wave_height'])
+# ---------------------------------------------------------
+# 4. 機械学習（AI）による判定モデル
+# ---------------------------------------------------------
+def predict_status(weather_info, conn):
+    cursor = conn.cursor()
+    cursor.execute("SELECT max_wind_speed, max_wave_height, wind_direction_deg, prev_day_max_wave, actual_status FROM ferry_records WHERE actual_status IN ('平常運航', '欠航')")
+    rows = cursor.fetchall()
+    
+    if len(rows) < 20:
+        if weather_info['max_wave_height'] >= 2.5 or weather_info['max_wind_speed'] >= 14.0:
+            return "欠航予想", "固定ルール"
+        elif weather_info['max_wave_height'] >= 1.8 or weather_info['max_wind_speed'] >= 10.0:
+            return "注意予想", "固定ルール"
+        else:
+            return "平常予想", "固定ルール"
 
-    feature_cols = ['max_wind_speed', 'max_wave_height', 'wind_dir_cos', 'wind_dir_sin', 'prev_day_max_wave']
-    X = df[feature_cols]
-    y = df['target']
+    X, y = [], []
+    for r in rows:
+        wind_deg = r[2] if r[2] is not None else 0.0
+        rad = math.radians(wind_deg)
+        prev_wave = r[3] if r[3] is not None else 1.0
+        X.append([r[0], r[1], math.cos(rad), math.sin(rad), prev_wave])
+        y.append(1 if r[4] == "欠航" else 0)
 
-    model = RandomForestClassifier(n_estimators=100, max_depth=4, random_state=42)
-    model.fit(X, y)
-    return model
+    clf = RandomForestClassifier(n_estimators=100, random_state=42)
+    clf.fit(X, y)
 
-def predict_single_day(model, weather, prev_wave):
-    if model is None:
-        status, prob = predict_with_rules(weather)
-        return status, prob, "固定ルール"
+    cur_rad = math.radians(weather_info['wind_direction_deg'])
+    cur_X = [[
+        weather_info['max_wind_speed'],
+        weather_info['max_wave_height'],
+        math.cos(cur_rad),
+        math.sin(cur_rad),
+        weather_info['prev_day_max_wave']
+    ]]
 
-    wind_dir = weather['wind_direction_deg']
-    feature_cols = ['max_wind_speed', 'max_wave_height', 'wind_dir_cos', 'wind_dir_sin', 'prev_day_max_wave']
-    input_data = pd.DataFrame([{
-        'max_wind_speed': weather['max_wind_speed'],
-        'max_wave_height': weather['max_wave_height'],
-        'wind_dir_cos': np.cos(np.radians(wind_dir)),
-        'wind_dir_sin': np.sin(np.radians(wind_dir)),
-        'prev_day_max_wave': prev_wave if prev_wave is not None else weather['max_wave_height']
-    }])[feature_cols]
+    cancel_prob = clf.predict_proba(cur_X)[0][1]
 
-    cancel_prob = model.predict_proba(input_data)[0][1] * 100.0
-
-    if cancel_prob >= 65.0:
-        status = "欠航予想"
-    elif cancel_prob >= 35.0:
-        status = "注意予想"
+    if cancel_prob >= 0.65:
+        return "欠航予想", "機械学習"
+    elif cancel_prob >= 0.35:
+        return "注意予想", "機械学習"
     else:
-        status = "平常予想"
+        return "平常予想", "機械学習"
 
-    return status, cancel_prob, "機械学習"
+# ---------------------------------------------------------
+# 5. index.html 自動生成処理
+# ---------------------------------------------------------
+def generate_html(conn):
+    df = pd.read_sql_query("SELECT * FROM ferry_records ORDER BY date DESC LIMIT 30", conn)
+    now_str = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d %H:%M:%S')
 
-# --- 5. Webダッシュボード（index.html）生成 ---
-def generate_html(weekly_predictions):
-    conn = sqlite3.connect(DB_PATH)
-    df_history = pd.read_sql_query("SELECT * FROM ferry_records ORDER BY date DESC LIMIT 15", conn)
-    conn.close()
-
-    # 1週間予測のテーブル生成
-    weekly_rows_html = ""
-    for p in weekly_predictions:
-        badge_color = "#e74c3c" if "欠航" in p['status'] else ("#f39c12" if "注意" in p['status'] else "#2ecc71")
-        weekly_rows_html += f"""
+    rows_html = ""
+    for _, r in df.iterrows():
+        pred = r['predicted_status'] or "-"
+        actual = r['actual_status'] or "確認中"
+        
+        # 色分け指定
+        color = "#e74c3c" if pred == "欠航予想" else ("#f39c12" if pred == "注意予想" else "#2ecc71")
+        
+        rows_html += f"""
