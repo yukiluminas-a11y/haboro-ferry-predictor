@@ -40,7 +40,6 @@ def init_db():
                 consecutive_cancels INTEGER DEFAULT 0
             )
         ''')
-        # 既存DBへのカラム追加互換処理
         try:
             cursor.execute("ALTER TABLE ferry_records ADD COLUMN consecutive_cancels INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
@@ -247,7 +246,7 @@ def predict_status_for_day(weather_info, cancels, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 7. index.html 自動生成処理 (f-string不使用・format構文で安全化)
+# 7. index.html 自動生成処理（クォート改行の完全安全対策）
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
@@ -276,4 +275,5 @@ def generate_html(conn):
                 h = str(r['max_wave_height']) + " m"
                 u = str(r['updated_at'])
                 
-                line = '
+                cells = [
+                    "
