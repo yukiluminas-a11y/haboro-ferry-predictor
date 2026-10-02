@@ -91,7 +91,6 @@ def fetch_weather_forecast_10days():
 
         for idx, date_str in enumerate(unique_dates):
             df_day = df[df['date_str'] == date_str]
-            # 冬期1便ダイヤ適用時間帯 (08:00〜14:00)
             df_sailing = df_day[(df_day['time'].dt.hour >= 8) & (df_day['time'].dt.hour <= 14)]
             if df_sailing.empty:
                 df_sailing = df_day
@@ -196,7 +195,7 @@ def predict_status_for_day(weather_info, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 6. index.html 自動生成処理 (文字列リテラル改行エラーの完全撲滅構造)
+# 6. index.html 自動生成処理 (完全構文安全設計)
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
@@ -206,20 +205,23 @@ def generate_html(conn):
         df_forecast = pd.read_sql_query("SELECT * FROM ferry_records WHERE date >= ? ORDER BY date ASC LIMIT 10", conn, params=(today_str,))
         df_history = pd.read_sql_query("SELECT * FROM ferry_records WHERE date <= ? ORDER BY date DESC LIMIT 30", conn, params=(today_str,))
 
-        def build_table_rows(df_data):
-            lines = []
+        def build_rows_html(df_data):
+            out = []
             for _, r in df_data.iterrows():
                 pred = str(r['predicted_status']) if pd.notna(r['predicted_status']) else "-"
                 actual = str(r['actual_status']) if pd.notna(r['actual_status']) and r['actual_status'] else "確認中"
                 mode = str(r['prediction_mode']) if pd.notna(r['prediction_mode']) else "-"
                 
-                color = "#e74c3c" if pred == "欠航予想" else ("#f39c12" if pred == "注意予想" else "#2ecc71")
+                if pred == "欠航予想":
+                    color = "#e74c3c"
+                elif pred == "注意予想":
+                    color = "#f39c12"
+                else:
+                    color = "#2ecc71"
                 
                 d = str(r['date'])
-                w = str(r['max_wind_speed'])
-                h = str(r['max_wave_height'])
+                w = str(r['max_wind_speed']) + " m/s"
+                h = str(r['max_wave_height']) + " m"
                 u = str(r['updated_at'])
                 
-                # 単一引用符の改行トラブルを防ぐため各要素を配列で結合
-                row_cells = [
-                    "
+                td_pred = f'
