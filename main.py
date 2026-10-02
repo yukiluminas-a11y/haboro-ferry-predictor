@@ -246,7 +246,7 @@ def predict_status_for_day(weather_info, cancels, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 7. index.html 自動生成処理（クォート改行の完全安全対策）
+# 7. index.html 自動生成処理（改行事故を物理回避）
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
@@ -275,5 +275,4 @@ def generate_html(conn):
                 h = str(r['max_wave_height']) + " m"
                 u = str(r['updated_at'])
                 
-                cells = [
-                    "
+                line = f"
