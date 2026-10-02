@@ -6,7 +6,6 @@ on:
     - cron: '30 22 * * *'
   workflow_dispatch:
 
-# リポジトリへの書き込み権限を明示的に付与
 permissions:
   contents: write
 
@@ -25,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas bs4 scikit-learn
+          pip install requests pandas beautifulsoup4 scikit-learn lxml joblib
 
       - name: Run main script
         run: |
@@ -33,12 +32,12 @@ jobs:
 
       - name: Commit and push changes
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add ferry_data.sqlite
-          # 変更がある場合のみコミット・Pushを実行
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # 生成・更新されるすべてのファイルを指定
+          git add ferry_data.sqlite ferry_model.pkl index.html
           if ! git diff --staged --quiet; then
-            git commit -m "Auto update ferry forecast [skip ci]"
+            git commit -m "Auto update ferry forecast and HTML [skip ci]"
             git push
           else
             echo "No changes to commit"
