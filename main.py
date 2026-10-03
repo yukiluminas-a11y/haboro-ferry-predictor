@@ -246,7 +246,7 @@ def predict_status_for_day(weather_info, cancels, clf):
         return fallback_rule()
 
 # ---------------------------------------------------------
-# 7. index.html 自動生成処理（改行事故を物理回避）
+# 7. index.html 自動生成処理（完全に文字列エスケープ・改行事故を防止）
 # ---------------------------------------------------------
 def generate_html(conn):
     try:
@@ -258,21 +258,4 @@ def generate_html(conn):
 
         def build_rows_html(df_data):
             out = []
-            for _, r in df_data.iterrows():
-                pred = str(r['predicted_status']) if pd.notna(r['predicted_status']) else "-"
-                actual = str(r['actual_status']) if pd.notna(r['actual_status']) and r['actual_status'] else "確認中"
-                mode = str(r['prediction_mode']) if pd.notna(r['prediction_mode']) else "-"
-                
-                if pred == "欠航予想":
-                    color = "#e74c3c"
-                elif pred == "注意予想":
-                    color = "#f39c12"
-                else:
-                    color = "#2ecc71"
-                
-                d = str(r['date'])
-                w = str(r['max_wind_speed']) + " m/s"
-                h = str(r['max_wave_height']) + " m"
-                u = str(r['updated_at'])
-                
-                line = f"
+            row_fmt = '
