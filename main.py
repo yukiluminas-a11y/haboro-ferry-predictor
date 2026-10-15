@@ -76,25 +76,50 @@ def get_consecutive_cancels(conn, target_date_str):
         return 0
 
 # ---------------------------------------------------------
-# 3. 公式サイトからの実績取得
+# 3. 公式サイトからの実績取得（誤判定防止・厳格抽出版）
 # ---------------------------------------------------------
 def fetch_official_status():
     url = "https://haboro-enkai.com/"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     try:
         response = requests.get(url, headers=headers, timeout=15)
         response.encoding = response.apparent_encoding
         soup = BeautifulSoup(response.text, 'html.parser')
-        text_content = soup.get_text() if soup else ""
         
-        if "欠航" in text_content:
-            return "欠航", text_content[:300]
-        elif "平常" in text_content or "通常" in text_content or "運航" in text_content:
-            return "平常運航", text_content[:300]
+        # トップページの最新お知らせエリア（またはメイン領域）を限定抽出
+        latest_post = (
+            soup.find('article') or 
+            soup.find('div', class_='post') or 
+            soup.find('div', id='main') or 
+            soup.find('div', class_='entry-content') or 
+            soup.body
+        )
+        
+        raw_text = latest_post.get_text() if latest_post else ""
+        snippet = " ".join(raw_text.split())[:300]  # 余分な改行やスペースを除去
+
+        # A. 明らかな全便欠航文言の判定
+        if any(kw in snippet for kw in ["全便欠航", "終日欠航", "全便の欠航", "欠航決定", "本日の運航は取りやめ", "終日見合わせ"]):
+            return "欠航", snippet
+
+        # B. 「欠航はありません」「平常通り運航」などの平常判定（否定表現の誤認識回避）
+        if any(kw in snippet for kw in ["欠航はありません", "欠航の予定はありません", "平常運航", "通常運航", "順調に運航", "全便運航", "ダイヤ通り"]):
+            return "平常運航", snippet
+
+        # C. 「一部欠航」などの表記（欠航として扱う）
+        if "一部欠航" in snippet or "繰り上げ欠航" in snippet:
+            return "欠航", snippet
+
+        # D. 条件分岐（「欠航」が含まれていても否定されていない場合のみ欠航）
+        if "欠航" in snippet and not any(neg in snippet for neg in ["ありません", "なし", "解除"]):
+            return "欠航", snippet
+        elif "運航" in snippet:
+            return "平常運航", snippet
         else:
-            return None, text_content[:300]
+            return None, snippet
+
     except Exception as e:
         print(f"[WARN] 公式サイト取得スキップ: {e}")
         return None, ""
@@ -200,7 +225,7 @@ def train_and_update_model(conn):
         clf.fit(X, y)
 
         joblib.dump(clf, MODEL_FILE)
-        print(f"[INFO] 自己学習完了: {len(rows)}件のデータ（連続欠航指標含む）でモデル更新・保存")
+        print(f"[INFO] 自己学習完了: {len(rows)}件のデータでモデル更新・保存")
         return clf
     except Exception as e:
         print(f"[ERROR] 自己学習処理エラー: {e}")
@@ -260,8 +285,8 @@ def generate_html(conn):
         html = ET.Element('html', lang='ja')
         head = ET.SubElement(html, 'head')
         
-        meta1 = ET.SubElement(head, 'meta', charset='UTF-8')
-        meta2 = ET.SubElement(head, 'meta', name='viewport', content='width=device-width, initial-scale=1.0')
+        ET.SubElement(head, 'meta', charset='UTF-8')
+        ET.SubElement(head, 'meta', name='viewport', content='width=device-width, initial-scale=1.0')
         
         title = ET.SubElement(head, 'title')
         title.text = '羽幌沿海フェリー 運航予測'
@@ -338,7 +363,7 @@ def generate_html(conn):
         append_section(body, '📅 向こう10日間の運航予測', df_forecast)
         append_section(body, '📜 過去の運航実績・予測履歴', df_history)
 
-        doc_type = '\n'
+        doc_type = '<!DOCTYPE html>\n'
         raw_xml = ET.tostring(html, encoding='utf-8').decode('utf-8')
         
         with open(HTML_FILE, 'w', encoding='utf-8') as f:
@@ -354,7 +379,17 @@ def generate_html(conn):
 def main():
     init_db()
     conn = sqlite3.connect(DB_FILE)
-    
+    cursor = conn.cursor()
+
+    # -----------------------------------------------------
+    # 【手動データ修正用コーナー】
+    # 過去に入り込んだ誤った実績を修正したい場合、以下のコメントアウト（#）を外し、
+    # 日付と正しい実績（'欠航' または '平常運航'）を指定してコミットしてください。
+    # -----------------------------------------------------
+    # cursor.execute("UPDATE ferry_records SET actual_status = ? WHERE date = ?", ('欠航', '2026-10-15'))
+    # cursor.execute("UPDATE ferry_records SET actual_status = ? WHERE date = ?", ('平常運航', '2026-10-14'))
+    # conn.commit()
+
     today_str = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d')
     now_timestamp = pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d %H:%M:%S')
 
@@ -367,8 +402,6 @@ def main():
 
     forecasts_10days = fetch_weather_forecast_10days()
     official_status, raw_text = fetch_official_status()
-
-    cursor = conn.cursor()
 
     simulated_cancels = get_consecutive_cancels(conn, today_str)
 
@@ -416,7 +449,7 @@ def main():
             simulated_cancels = 0
 
     conn.commit()
-    print(f"[{now_timestamp}] 連続欠航指標組み込み済み10日分予報DB更新が完了しました。")
+    print(f"[{now_timestamp}] 10日分予報DB更新および実績取得処理が完了しました。")
 
     generate_html(conn)
     conn.close()
